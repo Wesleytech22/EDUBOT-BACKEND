@@ -1,11 +1,12 @@
-# EduBot — Backend (Sprint 03)
+# EduBot — Backend (Sprint 04)
 
-API do Módulo Web de Gestão de Oportunidades e do Módulo B — Notificação em
-Massa. Node.js + Express + PostgreSQL.
+API do Módulo Web de Gestão de Oportunidades e dos módulos da extensão
+mobile (Notificação em Massa, Chatbot FAQ e Gestão de Consentimento).
+Node.js + Express + PostgreSQL.
 
-Escopo acumulado: Módulo A (RF-01 a RF-03), Módulo I (RF-20, RF-21) e, a
-partir desta Sprint, Módulo B (RF-04 a RF-06) — broadcast via workflow do
-N8N integrado à API do WAHA.
+Escopo acumulado: Módulo A (RF-01 a RF-03), Módulo I (RF-20, RF-21),
+Módulo B (RF-04 a RF-06) e, a partir desta Sprint, Módulo C — Chatbot FAQ
+(RF-07 a RF-09) e Módulo D — Gestão de Consentimento (RF-10, RF-11).
 
 ## Pré-requisitos
 
@@ -21,7 +22,7 @@ N8N integrado à API do WAHA.
 ```bash
 cp .env.example .env        # ajuste as credenciais se necessário
 npm install
-npm run migrate             # cria/atualiza as tabelas (users, opportunities, logs, contacts, dispatch_logs, ...)
+npm run migrate             # cria/atualiza as tabelas (users, opportunities, logs, contacts, dispatch_logs, consent_logs, support_requests, ...)
 npm run seed                # cria as contas de acesso e os contatos de teste do broadcast
 npm run dev                 # inicia em http://localhost:4000
 ```
@@ -49,6 +50,8 @@ Contas criadas pelo seed (definidas em `.env`):
 | PATCH | `/api/opportunities/:id/dispatch` | Aciona o broadcast (RF-04, RF-05) — só Administrador | Sim |
 | GET | `/api/opportunities/:id/dispatch-logs` | Log de envio por destinatário (RF-06) | Sim |
 | POST | `/api/webhooks/n8n/dispatch-status` | Callback do N8N com o status de entrega (RF-06) | Segredo compartilhado (`X-Webhook-Secret`) |
+| POST | `/api/webhooks/whatsapp/inbound` | Mensagem recebida no WhatsApp (RF-07 a RF-11) | Segredo compartilhado (`X-Webhook-Secret`) |
+| GET | `/api/support-requests` | Fila de solicitações encaminhadas a atendente humano (RF-09) | Sim |
 
 `status` retornado por oportunidade: `Rascunho`, `Ativa` ou `Encerrada`,
 calculado automaticamente a partir de `deadline` (RF-03).
@@ -67,9 +70,26 @@ calculado automaticamente a partir de `deadline` (RF-03).
    marcados como `falha` com o motivo, em vez de ficarem pendentes para
    sempre (mitigação do risco R-02).
 
-Cadastro de contatos: RF-10 (opt-in pelo próprio WhatsApp) só chega no
-Módulo D, na Sprint 04. Até lá, `npm run seed` povoa dois contatos de teste
-para o broadcast poder ser exercitado localmente.
+### Fluxo conversacional (RF-07 a RF-11)
+
+`POST /api/webhooks/whatsapp/inbound` recebe `{ phone, name, message }` —
+uma mensagem relayada pelo N8N a partir do WAHA — e devolve `{ reply }`
+com o texto que o workflow deve reenviar ao contato:
+
+- **Opt-in/opt-out (RF-10, RF-11)**: comandos `ENTRAR`/`INICIAR`/`START` e
+  `SAIR`/`PARAR`/`STOP` atualizam `contacts.opt_in` na hora e gravam um
+  registro em `consent_logs` (tipo, origem e data/hora).
+- **Menu (RF-08)**: comando `MENU` lista as oportunidades ativas.
+- **FAQ (RF-07)**: qualquer outra mensagem é casada por substring contra o
+  título das oportunidades ativas — casamento simples por palavra-chave,
+  sem NLP/classificação de intenção, adequado ao escopo do MVP e ao RNF-01
+  (resposta em menos de 5s).
+- **Atendimento humano (RF-09)**: comando `ATENDENTE`, ou qualquer mensagem
+  que o casamento por título não resolveu, cria um registro em
+  `support_requests` (consultável por `GET /api/support-requests`).
+
+Um contato que ainda não deu opt-in só recebe a instrução de enviar
+`ENTRAR` — nenhuma outra funcionalidade do bot roda antes disso (RNF-03).
 
 ## Como testar (critérios de aceite, seção 9 do Documento de Escopo)
 
@@ -111,6 +131,24 @@ curl -s -X POST http://localhost:4000/api/webhooks/n8n/dispatch-status \
 curl -s -X POST http://localhost:4000/api/webhooks/n8n/dispatch-status \
   -H "Content-Type: application/json" -H "X-Webhook-Secret: <N8N_WEBHOOK_SECRET>" \
   -d '{"logId":1,"status":"enviado","detail":"Entregue via WAHA"}'
+
+# contato novo pergunta algo antes do opt-in → recebe só a instrução de opt-in
+curl -s -X POST http://localhost:4000/api/webhooks/whatsapp/inbound \
+  -H "Content-Type: application/json" -H "X-Webhook-Secret: <N8N_WEBHOOK_SECRET>" \
+  -d '{"phone":"+5511999990099","name":"Teste","message":"oi"}'
+
+# opt-in
+curl -s -X POST http://localhost:4000/api/webhooks/whatsapp/inbound \
+  -H "Content-Type: application/json" -H "X-Webhook-Secret: <N8N_WEBHOOK_SECRET>" \
+  -d '{"phone":"+5511999990099","message":"ENTRAR"}'
+
+# menu de oportunidades ativas
+curl -s -X POST http://localhost:4000/api/webhooks/whatsapp/inbound \
+  -H "Content-Type: application/json" -H "X-Webhook-Secret: <N8N_WEBHOOK_SECRET>" \
+  -d '{"phone":"+5511999990099","message":"MENU"}'
+
+# fila de atendimento humano
+curl -s http://localhost:4000/api/support-requests -H "Authorization: Bearer <TOKEN>"
 ```
 
 ## Estrutura
@@ -126,6 +164,7 @@ src/
     migrations/
       001_init.sql             # users, opportunities, logs
       005_broadcast.sql        # contacts, dispatch_logs (RF-04 a RF-06)
+      006_chatbot_consentimento.sql  # consent_logs, support_requests (RF-07 a RF-11)
   middleware/
     auth.js                    # requireAuth / requireRole (RF-20, RF-21)
     webhookAuth.js              # requireWebhookSecret (RNF-08)
@@ -134,10 +173,12 @@ src/
     auth.controller.js
     opportunities.controller.js  # inclui dispatch (RF-04/05) e listDispatchLogs (RF-06)
     webhooks.controller.js       # callback de status do N8N
+    whatsapp.controller.js       # fluxo conversacional (RF-07 a RF-11)
   routes/
     auth.routes.js
     opportunities.routes.js
     webhooks.routes.js
+    support.routes.js            # fila de atendimento humano (RF-09)
   utils/
     jwt.js
     classifyStatus.js          # RF-03
