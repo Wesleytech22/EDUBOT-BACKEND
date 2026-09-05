@@ -26,16 +26,6 @@ async function registerConsent(contactId, type) {
   );
 }
 
-// RF-13 (Sprint 05) — cada mensagem recebida gera um registro classificado,
-// usado pelo painel de métricas para calcular taxa de resposta, dúvidas
-// mais frequentes e engajamento por oportunidade.
-async function registerInteraction(contactId, message, intent, opportunityId = null) {
-  await pool.query(
-    'INSERT INTO chat_interactions (contact_id, message, intent, opportunity_id) VALUES ($1, $2, $3, $4)',
-    [contactId, message, intent, opportunityId]
-  );
-}
-
 async function getActiveOpportunities() {
   const { rows } = await pool.query('SELECT * FROM opportunities WHERE is_draft = false ORDER BY created_at DESC');
   return rows.map((row) => ({ ...row, status: classifyStatus(row) })).filter((o) => o.status === 'Ativa');
@@ -105,7 +95,6 @@ async function handleInboundMessage(req, res, next) {
         await pool.query('UPDATE contacts SET opt_in = true WHERE id = $1', [contact.id]);
         await registerConsent(contact.id, 'opt_in');
       }
-      await registerInteraction(contact.id, message, 'opt_in');
       return res.json({
         reply:
           'Você está inscrito para receber novidades de oportunidades educacionais. Envie MENU a qualquer momento para ver as ativas, ou SAIR para cancelar.',
@@ -117,14 +106,12 @@ async function handleInboundMessage(req, res, next) {
         await pool.query('UPDATE contacts SET opt_in = false WHERE id = $1', [contact.id]);
       }
       await registerConsent(contact.id, 'opt_out');
-      await registerInteraction(contact.id, message, 'opt_out');
       return res.json({
         reply: 'Você não receberá mais notificações. Envie ENTRAR a qualquer momento para voltar a receber.',
       });
     }
 
     if (!contact.opt_in) {
-      await registerInteraction(contact.id, message, 'blocked_no_optin');
       return res.json({
         reply:
           'Olá! Para receber avisos de oportunidades educacionais, envie ENTRAR. Você pode cancelar quando quiser enviando SAIR.',
@@ -134,7 +121,6 @@ async function handleInboundMessage(req, res, next) {
     const activeOpportunities = await getActiveOpportunities();
 
     if (command === 'MENU') {
-      await registerInteraction(contact.id, message, 'menu');
       return res.json({ reply: buildMenuReply(activeOpportunities) });
     }
 
@@ -143,7 +129,6 @@ async function handleInboundMessage(req, res, next) {
         'INSERT INTO support_requests (contact_id, message) VALUES ($1, $2)',
         [contact.id, message]
       );
-      await registerInteraction(contact.id, message, 'escalated');
       return res.json({
         reply: 'Encaminhamos sua solicitação para a coordenação da escola. Em breve alguém vai te responder por aqui.',
       });
@@ -151,7 +136,6 @@ async function handleInboundMessage(req, res, next) {
 
     const matched = await matchOpportunityByTitle(message, activeOpportunities);
     if (matched) {
-      await registerInteraction(contact.id, message, 'faq_match', matched.id);
       return res.json({ reply: buildOpportunityDetailReply(matched) });
     }
 
@@ -161,7 +145,6 @@ async function handleInboundMessage(req, res, next) {
       'INSERT INTO support_requests (contact_id, message) VALUES ($1, $2)',
       [contact.id, message]
     );
-    await registerInteraction(contact.id, message, 'escalated');
     return res.json({
       reply:
         'Não encontrei essa informação automaticamente. Encaminhei sua dúvida para a coordenação da escola — em breve alguém responde por aqui. Envie MENU para ver as oportunidades ativas.',
