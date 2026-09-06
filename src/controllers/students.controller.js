@@ -7,6 +7,8 @@ function serialize(row) {
     name: row.name,
     grade: row.grade,
     attendance: Number(row.attendance),
+    attendancePresent: row.attendance_present,
+    attendanceAbsent: row.attendance_absent,
     situation: row.situation,
     schoolYear: row.school_year,
     syncedAt: row.synced_at,

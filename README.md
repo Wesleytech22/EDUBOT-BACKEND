@@ -161,9 +161,16 @@ sincronização abaixo funciona igual esteja a escola no modo "link" ou
 "arquivo". Layout esperado das linhas (a partir do intervalo configurado,
 no modo link, ou das colunas do CSV, no modo arquivo — sem cabeçalho):
 
-| Coluna A | Coluna B | Coluna C | Coluna D |
-|---|---|---|---|
-| Nome | Série | Frequência (%) | Situação (`Regular`/`Atenção`/`Risco`) |
+| Coluna A | Coluna B | Coluna C | Coluna D | Coluna E |
+|---|---|---|---|---|
+| Nome | Série | Presenças | Faltas | Situação (`Regular`/`Atenção`/`Risco`) |
+
+A coordenação registra **presenças e faltas** (números inteiros) — nunca
+uma porcentagem digitada à mão. `attendance` (frequência, em %) é sempre
+calculada pelo sistema a partir desses dois números
+(`presenças ÷ (presenças + faltas) × 100`, arredondado a 1 casa decimal);
+`GET /api/students` devolve `attendancePresent` e `attendanceAbsent` além
+do percentual já calculado.
 
 - **RF-16**: além de `POST /api/students/sync` (disparo manual), o
   `server.js` roda `syncStudentsFromSheet()` a cada `SYNC_INTERVAL_MINUTES`
@@ -252,7 +259,7 @@ curl -s http://localhost:4000/api/metrics/overview -H "Authorization: Bearer <TO
 # configura a planilha por link (RF-15, modo "link")
 curl -s -X PUT http://localhost:4000/api/integrations/sheets/config \
   -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
-  -d '{"sheetUrl":"https://docs.google.com/spreadsheets/d/<ID_DA_PLANILHA>/edit","sheetRange":"Alunos!A2:F"}'
+  -d '{"sheetUrl":"https://docs.google.com/spreadsheets/d/<ID_DA_PLANILHA>/edit","sheetRange":"Alunos!A2:E"}'
 
 # anexa um CSV em vez do link (RF-15, modo "arquivo")
 curl -s -X POST http://localhost:4000/api/integrations/sheets/upload \
@@ -290,6 +297,7 @@ src/
       003_chatbot_consentimento.sql  # consent_logs, support_requests (RF-07 a RF-11)
       004_metricas_integracoes.sql   # chat_interactions, sheet_config (RF-12 a RF-15)
       005_dashboard_escolar.sql      # students, sync_runs (RF-16 a RF-19)
+      007_frequencia_presencas_faltas.sql  # presencas/faltas em students (RF-18)
       006_sheet_upload.sql           # colunas de source/upload em sheet_config (RF-15)
   middleware/
     auth.js                  # requireAuth / requireRole (RF-20, RF-21)
