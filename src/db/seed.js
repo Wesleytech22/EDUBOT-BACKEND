@@ -19,6 +19,35 @@ async function upsertUser({ name, email, password, role, schoolId }) {
   console.log(`Usuário pronto: ${email} (${role})`);
 }
 
+// RF-04 — contatos de exemplo para exercitar o broadcast em ambiente local.
+// O cadastro real de opt-in pelo próprio WhatsApp (RF-10) chega no Módulo D,
+// na Sprint 04 — até lá, esta é a única forma de povoar a lista de envio.
+async function upsertContact({ phone, name }) {
+  await pool.query(
+    `INSERT INTO contacts (phone, name, opt_in)
+     VALUES ($1, $2, true)
+     ON CONFLICT (phone) DO NOTHING`,
+    [phone, name]
+  );
+}
+
+// RF-18 — alunos de exemplo para exercitar o dashboard escolar sem
+// depender de uma planilha real configurada. A sincronização de verdade
+// (Módulo G) sobrescreve estes registros na primeira execução bem-sucedida.
+// A coordenação registra presenças/faltas (números inteiros); a
+// frequência (%) é sempre calculada, nunca digitada diretamente.
+async function upsertStudent({ name, grade, present, absent, situation }) {
+  const total = present + absent;
+  const attendance = total === 0 ? 0 : Math.round((present / total) * 1000) / 10;
+
+  await pool.query(
+    `INSERT INTO students (name, grade, attendance, attendance_present, attendance_absent, situation, school_year, synced_at)
+     VALUES ($1, $2, $3, $4, $5, $6, EXTRACT(YEAR FROM now()), now())
+     ON CONFLICT (name, grade, school_year) DO NOTHING`,
+    [name, grade, attendance, present, absent, situation]
+  );
+}
+
 async function seed() {
   // Multi-escola — a migration já cria a "Escola Padrão" (slug
   // escola-padrao); o seed só a reaproveita para as contas de teste.
@@ -51,6 +80,15 @@ async function seed() {
     role: 'equipe_escola',
     schoolId: defaultSchoolId,
   });
+
+  await upsertContact({ phone: '+5511999990001', name: 'Aluno de teste 1' });
+  await upsertContact({ phone: '+5511999990002', name: 'Responsável de teste 2' });
+  console.log('Contatos de teste prontos (RF-04).');
+
+  await upsertStudent({ name: 'Ana Souza', grade: '9º Ano A', present: 92, absent: 8, situation: 'Regular' });
+  await upsertStudent({ name: 'Bruno Lima', grade: '9º Ano A', present: 68, absent: 32, situation: 'Atenção' });
+  await upsertStudent({ name: 'Carla Dias', grade: '1º Ano B', present: 45, absent: 55, situation: 'Risco' });
+  console.log('Alunos de teste prontos (RF-18).');
 
   await pool.end();
 }
