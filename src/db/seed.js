@@ -22,12 +22,12 @@ async function upsertUser({ name, email, password, role, schoolId }) {
 // RF-04 — contatos de exemplo para exercitar o broadcast em ambiente local.
 // O cadastro real de opt-in pelo próprio WhatsApp (RF-10) chega no Módulo D,
 // na Sprint 04 — até lá, esta é a única forma de povoar a lista de envio.
-async function upsertContact({ phone, name }) {
+async function upsertContact({ schoolId, phone, name }) {
   await pool.query(
-    `INSERT INTO contacts (phone, name, opt_in)
-     VALUES ($1, $2, true)
-     ON CONFLICT (phone) DO NOTHING`,
-    [phone, name]
+    `INSERT INTO contacts (school_id, phone, name, opt_in)
+     VALUES ($1, $2, $3, true)
+     ON CONFLICT (school_id, phone) DO NOTHING`,
+    [schoolId, phone, name]
   );
 }
 
@@ -36,15 +36,15 @@ async function upsertContact({ phone, name }) {
 // (Módulo G) sobrescreve estes registros na primeira execução bem-sucedida.
 // A coordenação registra presenças/faltas (números inteiros); a
 // frequência (%) é sempre calculada, nunca digitada diretamente.
-async function upsertStudent({ name, grade, present, absent, situation }) {
+async function upsertStudent({ schoolId, name, grade, present, absent, situation }) {
   const total = present + absent;
   const attendance = total === 0 ? 0 : Math.round((present / total) * 1000) / 10;
 
   await pool.query(
-    `INSERT INTO students (name, grade, attendance, attendance_present, attendance_absent, situation, school_year, synced_at)
-     VALUES ($1, $2, $3, $4, $5, $6, EXTRACT(YEAR FROM now()), now())
-     ON CONFLICT (name, grade, school_year) DO NOTHING`,
-    [name, grade, attendance, present, absent, situation]
+    `INSERT INTO students (school_id, name, grade, attendance, attendance_present, attendance_absent, situation, school_year, synced_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, EXTRACT(YEAR FROM now()), now())
+     ON CONFLICT (school_id, name, grade, school_year) DO NOTHING`,
+    [schoolId, name, grade, attendance, present, absent, situation]
   );
 }
 
@@ -81,13 +81,13 @@ async function seed() {
     schoolId: defaultSchoolId,
   });
 
-  await upsertContact({ phone: '+5511999990001', name: 'Aluno de teste 1' });
-  await upsertContact({ phone: '+5511999990002', name: 'Responsável de teste 2' });
+  await upsertContact({ schoolId: defaultSchoolId, phone: '+5511999990001', name: 'Aluno de teste 1' });
+  await upsertContact({ schoolId: defaultSchoolId, phone: '+5511999990002', name: 'Responsável de teste 2' });
   console.log('Contatos de teste prontos (RF-04).');
 
-  await upsertStudent({ name: 'Ana Souza', grade: '9º Ano A', present: 92, absent: 8, situation: 'Regular' });
-  await upsertStudent({ name: 'Bruno Lima', grade: '9º Ano A', present: 68, absent: 32, situation: 'Atenção' });
-  await upsertStudent({ name: 'Carla Dias', grade: '1º Ano B', present: 45, absent: 55, situation: 'Risco' });
+  await upsertStudent({ schoolId: defaultSchoolId, name: 'Ana Souza', grade: '9º Ano A', present: 92, absent: 8, situation: 'Regular' });
+  await upsertStudent({ schoolId: defaultSchoolId, name: 'Bruno Lima', grade: '9º Ano A', present: 68, absent: 32, situation: 'Atenção' });
+  await upsertStudent({ schoolId: defaultSchoolId, name: 'Carla Dias', grade: '1º Ano B', present: 45, absent: 55, situation: 'Risco' });
   console.log('Alunos de teste prontos (RF-18).');
 
   await pool.end();

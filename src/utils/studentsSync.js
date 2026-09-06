@@ -28,7 +28,10 @@ function parseSituation(raw) {
   return 'Regular';
 }
 
-async function upsertStudent(row) {
+// Multi-escola — cada aluno pertence à base de uma escola (ver migration
+// 009); o upsert nunca mistura os alunos de uma escola com os de outra,
+// mesmo que tenham o mesmo nome.
+async function upsertStudent(schoolId, row) {
   const [name, grade, presentRaw, absentRaw, situationRaw] = row;
   if (!name || !grade) return false;
 
@@ -37,45 +40,57 @@ async function upsertStudent(row) {
   const attendance = calculateAttendance(present, absent);
 
   await pool.query(
-    `INSERT INTO students (name, grade, attendance, attendance_present, attendance_absent, situation, school_year, synced_at)
-     VALUES ($1, $2, $3, $4, $5, $6, EXTRACT(YEAR FROM now()), now())
-     ON CONFLICT (name, grade, school_year) DO UPDATE SET
+    `INSERT INTO students (school_id, name, grade, attendance, attendance_present, attendance_absent, situation, school_year, synced_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, EXTRACT(YEAR FROM now()), now())
+     ON CONFLICT (school_id, name, grade, school_year) DO UPDATE SET
        attendance = EXCLUDED.attendance,
        attendance_present = EXCLUDED.attendance_present,
        attendance_absent = EXCLUDED.attendance_absent,
        situation = EXCLUDED.situation,
        synced_at = now()`,
-    [String(name).trim(), String(grade).trim(), attendance, present, absent, parseSituation(situationRaw)]
+    [schoolId, String(name).trim(), String(grade).trim(), attendance, present, absent, parseSituation(situationRaw)]
   );
   return true;
 }
 
 // RF-16, RF-17 — lê a planilha configurada (Módulo F, nos dois modos —
-// link ou arquivo anexado) e sincroniza a tabela students, registrando o
-// resultado (sucesso/falha) em sync_runs.
-async function syncStudentsFromSheet() {
-  const { rows: configRows } = await pool.query('SELECT * FROM sheet_config WHERE id = 1');
+// link ou arquivo anexado) de uma escola e sincroniza a tabela students,
+// registrando o resultado (sucesso/falha) em sync_runs.
+async function syncStudentsFromSheet(schoolId) {
+  const { rows: configRows } = await pool.query('SELECT * FROM sheet_config WHERE school_id = $1', [schoolId]);
   const config = configRows[0];
 
   try {
     const { values } = await resolveSheetRows(config);
     let synced = 0;
     for (const row of values) {
-      if (await upsertStudent(row)) synced += 1;
+      if (await upsertStudent(schoolId, row)) synced += 1;
     }
 
     await pool.query(
-      "INSERT INTO sync_runs (status, rows_synced, detail) VALUES ('sucesso', $1, $2)",
-      [synced, `${synced} de ${values.length} linha(s) sincronizada(s).`]
+      "INSERT INTO sync_runs (school_id, status, rows_synced, detail) VALUES ($1, 'sucesso', $2, $3)",
+      [schoolId, synced, `${synced} de ${values.length} linha(s) sincronizada(s).`]
     );
     return { status: 'sucesso', rowsSynced: synced };
   } catch (err) {
     await pool.query(
-      "INSERT INTO sync_runs (status, rows_synced, detail) VALUES ('falha', 0, $1)",
-      [err.message]
+      "INSERT INTO sync_runs (school_id, status, rows_synced, detail) VALUES ($1, 'falha', 0, $2)",
+      [schoolId, err.message]
     );
     return { status: 'falha', rowsSynced: 0, detail: err.message };
   }
 }
 
-module.exports = { syncStudentsFromSheet, calculateAttendance };
+// RF-16 — rotina periódica (server.js): sincroniza todas as escolas que já
+// configuraram uma planilha (link ou arquivo). Uma escola que nunca
+// configurou nada não gera tentativas de sincronização "fantasma".
+async function syncAllSchools() {
+  const { rows } = await pool.query('SELECT school_id FROM sheet_config');
+  const results = [];
+  for (const { school_id: schoolId } of rows) {
+    results.push({ schoolId, ...(await syncStudentsFromSheet(schoolId)) });
+  }
+  return results;
+}
+
+module.exports = { syncStudentsFromSheet, syncAllSchools, calculateAttendance };

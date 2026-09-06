@@ -164,7 +164,10 @@ async function dispatch(req, res, next) {
     if (current.is_draft) return res.status(400).json({ error: 'Não é possível disparar um rascunho.' });
     if (current.dispatched_at) return res.status(400).json({ error: 'O disparo não pode ser cancelado nem repetido depois de iniciado.' });
 
-    const { rows: contacts } = await pool.query('SELECT * FROM contacts WHERE opt_in = true');
+    const { rows: contacts } = await pool.query(
+      'SELECT * FROM contacts WHERE school_id = $1 AND opt_in = true',
+      [req.user.schoolId]
+    );
     if (contacts.length === 0) {
       return res.status(400).json({ error: 'Nenhum contato com opt-in ativo para receber o disparo.' });
     }
@@ -178,9 +181,9 @@ async function dispatch(req, res, next) {
 
     const { rows: logRows } = await pool.query(
       `INSERT INTO dispatch_logs (opportunity_id, contact_id, status)
-       SELECT $1, id, 'pendente' FROM contacts WHERE opt_in = true
+       SELECT $1, id, 'pendente' FROM contacts WHERE school_id = $2 AND opt_in = true
        RETURNING *`,
-      [req.params.id]
+      [req.params.id, req.user.schoolId]
     );
 
     const logIdByContactId = new Map(logRows.map((l) => [l.contact_id, l.id]));
@@ -229,6 +232,12 @@ async function dispatch(req, res, next) {
 // status de entrega) de uma oportunidade já disparada.
 async function listDispatchLogs(req, res, next) {
   try {
+    const { rows: opportunityRows } = await pool.query(
+      'SELECT id FROM opportunities WHERE id = $1 AND school_id = $2',
+      [req.params.id, req.user.schoolId]
+    );
+    if (!opportunityRows[0]) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
+
     const { rows } = await pool.query(
       `SELECT dl.id, dl.status, dl.detail, dl.created_at, dl.updated_at,
               c.id AS contact_id, c.name AS contact_name, c.phone AS contact_phone

@@ -2,16 +2,18 @@ const pool = require('../db/pool');
 const { extractSheetId, resolveSheetRows } = require('../utils/googleSheets');
 const { parseCsvBuffer } = require('../utils/csvParser');
 
-async function getConfigRow() {
-  const { rows } = await pool.query('SELECT * FROM sheet_config WHERE id = 1');
+// Multi-escola — sheet_config tem uma linha por escola (school_id é a
+// chave primária, ver migration 009), não mais uma linha única global.
+async function getConfigRow(schoolId) {
+  const { rows } = await pool.query('SELECT * FROM sheet_config WHERE school_id = $1', [schoolId]);
   return rows[0] || null;
 }
 
 // RF-15 — o Administrador consulta qual planilha (link ao vivo ou arquivo
-// anexado) está configurada.
+// anexado) está configurada para a própria escola.
 async function getSheetConfig(req, res, next) {
   try {
-    const config = await getConfigRow();
+    const config = await getConfigRow(req.user.schoolId);
     return res.json({
       source: config?.source || 'api',
       sheetId: config?.sheet_id || null,
@@ -26,7 +28,7 @@ async function getSheetConfig(req, res, next) {
 }
 
 // RF-15 — modo "link": o Administrador cola o link (ou o ID isolado) da
-// planilha e o intervalo de dados consumido.
+// planilha e o intervalo de dados consumido, para a própria escola.
 async function updateSheetConfig(req, res, next) {
   try {
     const { sheetUrl, sheetId: rawSheetId, sheetRange } = req.body;
@@ -38,16 +40,16 @@ async function updateSheetConfig(req, res, next) {
     const sheetId = extractSheetId(input);
 
     const { rows } = await pool.query(
-      `INSERT INTO sheet_config (id, source, sheet_id, sheet_range, updated_by, updated_at)
-       VALUES (1, 'api', $1, $2, $3, now())
-       ON CONFLICT (id) DO UPDATE SET
+      `INSERT INTO sheet_config (school_id, source, sheet_id, sheet_range, updated_by, updated_at)
+       VALUES ($1, 'api', $2, $3, $4, now())
+       ON CONFLICT (school_id) DO UPDATE SET
          source = 'api',
          sheet_id = EXCLUDED.sheet_id,
          sheet_range = EXCLUDED.sheet_range,
          updated_by = EXCLUDED.updated_by,
          updated_at = now()
        RETURNING *`,
-      [sheetId, sheetRange?.trim() || 'A:Z', req.user.sub]
+      [req.user.schoolId, sheetId, sheetRange?.trim() || 'A:Z', req.user.sub]
     );
 
     return res.json({
@@ -62,7 +64,7 @@ async function updateSheetConfig(req, res, next) {
 }
 
 // RF-15 — modo "arquivo": o Administrador anexa um CSV exportado da
-// planilha, para escolas que preferem não compartilhar o link.
+// planilha da própria escola, para quem prefere não compartilhar o link.
 async function uploadSheetFile(req, res, next) {
   try {
     if (!req.file) {
@@ -77,9 +79,9 @@ async function uploadSheetFile(req, res, next) {
     const values = parseCsvBuffer(req.file.buffer);
 
     const { rows } = await pool.query(
-      `INSERT INTO sheet_config (id, source, uploaded_filename, uploaded_rows, updated_by, updated_at, uploaded_at)
-       VALUES (1, 'upload', $1, $2, $3, now(), now())
-       ON CONFLICT (id) DO UPDATE SET
+      `INSERT INTO sheet_config (school_id, source, uploaded_filename, uploaded_rows, updated_by, updated_at, uploaded_at)
+       VALUES ($1, 'upload', $2, $3, $4, now(), now())
+       ON CONFLICT (school_id) DO UPDATE SET
          source = 'upload',
          uploaded_filename = EXCLUDED.uploaded_filename,
          uploaded_rows = EXCLUDED.uploaded_rows,
@@ -87,7 +89,7 @@ async function uploadSheetFile(req, res, next) {
          updated_at = now(),
          uploaded_at = now()
        RETURNING *`,
-      [req.file.originalname, JSON.stringify(values), req.user.sub]
+      [req.user.schoolId, req.file.originalname, JSON.stringify(values), req.user.sub]
     );
 
     return res.json({
@@ -103,11 +105,12 @@ async function uploadSheetFile(req, res, next) {
 }
 
 // RF-14 — prova de conceito de leitura: lê a planilha configurada (via
-// API ou via arquivo anexado) e devolve as linhas cruas, sem gravar nada
-// (a sincronização do dashboard escolar é o Módulo G, na Sprint 06).
+// API ou via arquivo anexado) da própria escola e devolve as linhas
+// cruas, sem gravar nada (a sincronização do dashboard escolar é o
+// Módulo G, na Sprint 06).
 async function previewSheet(req, res, next) {
   try {
-    const config = await getConfigRow();
+    const config = await getConfigRow(req.user.schoolId);
     const result = await resolveSheetRows(config);
     return res.json(result);
   } catch (err) {
