@@ -4,6 +4,7 @@ const morgan = require('morgan');
 
 const authRoutes = require('./routes/auth.routes');
 const opportunitiesRoutes = require('./routes/opportunities.routes');
+const schoolsRoutes = require('./routes/schools.routes');
 const webhooksRoutes = require('./routes/webhooks.routes');
 const supportRoutes = require('./routes/support.routes');
 const metricsRoutes = require('./routes/metrics.routes');
@@ -21,6 +22,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', sprint: '06' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/opportunities', opportunitiesRoutes);
+app.use('/api/schools', schoolsRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/support-requests', supportRoutes);
 app.use('/api/metrics', metricsRoutes);

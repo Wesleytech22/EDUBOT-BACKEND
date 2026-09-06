@@ -33,7 +33,7 @@ async function login(req, res, next) {
 
     return res.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, schoolId: user.school_id },
     });
   } catch (err) {
     return next(err);

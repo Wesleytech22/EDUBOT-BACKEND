@@ -10,6 +10,9 @@ const router = express.Router();
 router.post('/n8n/dispatch-status', requireWebhookSecret, reportDispatchStatus);
 
 // RF-07 a RF-11 — mensagem recebida no WhatsApp, relayada pelo N8N/WAHA.
-router.post('/whatsapp/inbound', requireWebhookSecret, handleInboundMessage);
+// Multi-escola — :schoolSlug identifica de qual escola veio a mensagem,
+// já que cada uma tem seu próprio número/instância WAHA e configura essa
+// URL no próprio workflow do N8N.
+router.post('/whatsapp/inbound/:schoolSlug', requireWebhookSecret, handleInboundMessage);
 
 module.exports = router;

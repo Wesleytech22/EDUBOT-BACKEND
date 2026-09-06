@@ -8,13 +8,26 @@ const COMMANDS = {
   HUMAN: ['ATENDENTE', 'HUMANO', 'FALAR COM ALGUEM', 'FALAR COM ALGUÉM'],
 };
 
-async function findOrCreateContact(phone, name) {
-  const { rows } = await pool.query('SELECT * FROM contacts WHERE phone = $1', [phone]);
+// Multi-escola — cada escola tem seu próprio número/instância WAHA, então o
+// workflow do N8N de cada uma chama esta rota pelo seu próprio slug
+// (POST /webhooks/whatsapp/inbound/:schoolSlug). Contatos, consentimento,
+// interações e solicitações de atendimento são todos amarrados à escola
+// resolvida aqui — nunca vazam entre escolas diferentes.
+async function resolveSchoolBySlug(slug) {
+  const { rows } = await pool.query('SELECT * FROM schools WHERE slug = $1', [slug]);
+  return rows[0] || null;
+}
+
+async function findOrCreateContact(schoolId, phone, name) {
+  const { rows } = await pool.query('SELECT * FROM contacts WHERE school_id = $1 AND phone = $2', [
+    schoolId,
+    phone,
+  ]);
   if (rows[0]) return rows[0];
 
   const { rows: created } = await pool.query(
-    `INSERT INTO contacts (phone, name, opt_in) VALUES ($1, $2, false) RETURNING *`,
-    [phone, name || null]
+    `INSERT INTO contacts (school_id, phone, name, opt_in) VALUES ($1, $2, $3, false) RETURNING *`,
+    [schoolId, phone, name || null]
   );
   return created[0];
 }
@@ -36,8 +49,11 @@ async function registerInteraction(contactId, message, intent, opportunityId = n
   );
 }
 
-async function getActiveOpportunities() {
-  const { rows } = await pool.query('SELECT * FROM opportunities WHERE is_draft = false ORDER BY created_at DESC');
+async function getActiveOpportunities(schoolId) {
+  const { rows } = await pool.query(
+    'SELECT * FROM opportunities WHERE school_id = $1 AND is_draft = false ORDER BY created_at DESC',
+    [schoolId]
+  );
   return rows.map((row) => ({ ...row, status: classifyStatus(row) })).filter((o) => o.status === 'Ativa');
 }
 
@@ -87,9 +103,9 @@ async function matchOpportunityByTitle(message, activeOpportunities) {
 }
 
 // RF-07 a RF-11 — webhook chamado pelo workflow do N8N a cada mensagem
-// recebida via WAHA. Aplica o fluxo conversacional (opt-in/opt-out, menu,
-// FAQ e encaminhamento humano) e devolve o texto que o N8N deve reenviar
-// ao contato pelo WAHA.
+// recebida via WAHA, uma vez por escola (:schoolSlug identifica de qual).
+// Aplica o fluxo conversacional (opt-in/opt-out, menu, FAQ e encaminhamento
+// humano) e devolve o texto que o N8N deve reenviar ao contato pelo WAHA.
 async function handleInboundMessage(req, res, next) {
   try {
     const { phone, name, message } = req.body;
@@ -97,7 +113,12 @@ async function handleInboundMessage(req, res, next) {
       return res.status(400).json({ error: 'Informe phone e message.' });
     }
 
-    const contact = await findOrCreateContact(phone, name);
+    const school = await resolveSchoolBySlug(req.params.schoolSlug);
+    if (!school) {
+      return res.status(404).json({ error: 'Escola não encontrada para este webhook.' });
+    }
+
+    const contact = await findOrCreateContact(school.id, phone, name);
     const command = matchCommand(message);
 
     if (command === 'OPT_IN') {
@@ -131,7 +152,7 @@ async function handleInboundMessage(req, res, next) {
       });
     }
 
-    const activeOpportunities = await getActiveOpportunities();
+    const activeOpportunities = await getActiveOpportunities(school.id);
 
     if (command === 'MENU') {
       await registerInteraction(contact.id, message, 'menu');
@@ -171,7 +192,8 @@ async function handleInboundMessage(req, res, next) {
   }
 }
 
-// Consulta administrativa da fila de atendimento humano (RF-09).
+// Consulta administrativa da fila de atendimento humano (RF-09), restrita
+// à escola do usuário logado.
 async function listSupportRequests(req, res, next) {
   try {
     const { rows } = await pool.query(
@@ -179,7 +201,9 @@ async function listSupportRequests(req, res, next) {
               c.id AS contact_id, c.name AS contact_name, c.phone AS contact_phone
        FROM support_requests sr
        JOIN contacts c ON c.id = sr.contact_id
-       ORDER BY sr.created_at DESC`
+       WHERE c.school_id = $1
+       ORDER BY sr.created_at DESC`,
+      [req.user.schoolId]
     );
 
     return res.json({

@@ -1,9 +1,19 @@
 const pool = require('../db/pool');
 
-// RF-12 — métricas de envio, com rastreabilidade total.
-async function getDispatchMetrics() {
+// Multi-escola — dispatch_logs e chat_interactions não têm coluna própria
+// de school_id (ver migration 009): o isolamento vem de JOIN com
+// opportunities e contacts, que já pertencem a uma escola.
+
+// RF-12 — métricas de envio, com rastreabilidade total, só da escola do
+// usuário logado.
+async function getDispatchMetrics(schoolId) {
   const { rows } = await pool.query(
-    `SELECT status, COUNT(*)::int AS count FROM dispatch_logs GROUP BY status`
+    `SELECT dl.status, COUNT(*)::int AS count
+     FROM dispatch_logs dl
+     JOIN opportunities o ON o.id = dl.opportunity_id
+     WHERE o.school_id = $1
+     GROUP BY dl.status`,
+    [schoolId]
   );
   const byStatus = { pendente: 0, enviado: 0, falha: 0 };
   rows.forEach((r) => {
@@ -13,7 +23,11 @@ async function getDispatchMetrics() {
   const totalSent = byStatus.pendente + byStatus.enviado + byStatus.falha;
 
   const { rows: reachedRows } = await pool.query(
-    `SELECT COUNT(DISTINCT contact_id)::int AS count FROM dispatch_logs WHERE status = 'enviado'`
+    `SELECT COUNT(DISTINCT dl.contact_id)::int AS count
+     FROM dispatch_logs dl
+     JOIN opportunities o ON o.id = dl.opportunity_id
+     WHERE o.school_id = $1 AND dl.status = 'enviado'`,
+    [schoolId]
   );
 
   return {
@@ -27,10 +41,16 @@ async function getDispatchMetrics() {
 }
 
 // RF-13 — métricas de interação: dúvidas mais frequentes, taxa de
-// respostas recebidas e oportunidades com maior engajamento.
-async function getInteractionMetrics() {
+// respostas recebidas e oportunidades com maior engajamento, só da escola
+// do usuário logado.
+async function getInteractionMetrics(schoolId) {
   const { rows: intentRows } = await pool.query(
-    `SELECT intent, COUNT(*)::int AS count FROM chat_interactions GROUP BY intent`
+    `SELECT ci.intent, COUNT(*)::int AS count
+     FROM chat_interactions ci
+     JOIN contacts c ON c.id = ci.contact_id
+     WHERE c.school_id = $1
+     GROUP BY ci.intent`,
+    [schoolId]
   );
   const byIntent = {};
   intentRows.forEach((r) => {
@@ -41,23 +61,31 @@ async function getInteractionMetrics() {
   const totalQuestions = faqResolved + escalated;
 
   const { rows: respondersRows } = await pool.query(
-    `SELECT COUNT(DISTINCT contact_id)::int AS count
-     FROM chat_interactions
-     WHERE intent NOT IN ('blocked_no_optin')`
+    `SELECT COUNT(DISTINCT ci.contact_id)::int AS count
+     FROM chat_interactions ci
+     JOIN contacts c ON c.id = ci.contact_id
+     WHERE c.school_id = $1 AND ci.intent NOT IN ('blocked_no_optin')`,
+    [schoolId]
   );
   const { rows: reachedRows } = await pool.query(
-    `SELECT COUNT(DISTINCT contact_id)::int AS count FROM dispatch_logs WHERE status = 'enviado'`
+    `SELECT COUNT(DISTINCT dl.contact_id)::int AS count
+     FROM dispatch_logs dl
+     JOIN opportunities o ON o.id = dl.opportunity_id
+     WHERE o.school_id = $1 AND dl.status = 'enviado'`,
+    [schoolId]
   );
   const contactsReached = reachedRows[0].count;
   const respondersCount = respondersRows[0].count;
 
   const { rows: frequentQuestions } = await pool.query(
-    `SELECT lower(trim(message)) AS message, COUNT(*)::int AS count
-     FROM chat_interactions
-     WHERE intent IN ('faq_match', 'escalated')
-     GROUP BY lower(trim(message))
+    `SELECT lower(trim(ci.message)) AS message, COUNT(*)::int AS count
+     FROM chat_interactions ci
+     JOIN contacts c ON c.id = ci.contact_id
+     WHERE c.school_id = $1 AND ci.intent IN ('faq_match', 'escalated')
+     GROUP BY lower(trim(ci.message))
      ORDER BY count DESC
-     LIMIT 5`
+     LIMIT 5`,
+    [schoolId]
   );
 
   const { rows: engagementRows } = await pool.query(
@@ -69,10 +97,11 @@ async function getInteractionMetrics() {
      FROM opportunities o
      LEFT JOIN dispatch_logs dl ON dl.opportunity_id = o.id
      LEFT JOIN chat_interactions ci ON ci.opportunity_id = o.id AND ci.intent = 'faq_match'
-     WHERE o.dispatched_at IS NOT NULL
+     WHERE o.school_id = $1 AND o.dispatched_at IS NOT NULL
      GROUP BY o.id, o.title
      ORDER BY asked_about DESC, sent_to DESC
-     LIMIT 5`
+     LIMIT 5`,
+    [schoolId]
   );
 
   return {
@@ -95,7 +124,10 @@ async function getInteractionMetrics() {
 // RF-12, RF-13 — painel de métricas consolidado (Módulo E).
 async function getOverview(req, res, next) {
   try {
-    const [dispatch, chatbot] = await Promise.all([getDispatchMetrics(), getInteractionMetrics()]);
+    const [dispatch, chatbot] = await Promise.all([
+      getDispatchMetrics(req.user.schoolId),
+      getInteractionMetrics(req.user.schoolId),
+    ]);
     return res.json({ dispatch, chatbot });
   } catch (err) {
     return next(err);
@@ -103,7 +135,7 @@ async function getOverview(req, res, next) {
 }
 
 // RF-12 — status de entrega de cada notificação, através de todas as
-// oportunidades (rastreabilidade total, RNF-07).
+// oportunidades da escola do usuário logado (rastreabilidade total, RNF-07).
 async function listAllDispatchLogs(req, res, next) {
   try {
     const { rows } = await pool.query(
@@ -113,8 +145,10 @@ async function listAllDispatchLogs(req, res, next) {
        FROM dispatch_logs dl
        JOIN opportunities o ON o.id = dl.opportunity_id
        JOIN contacts c ON c.id = dl.contact_id
+       WHERE o.school_id = $1
        ORDER BY dl.created_at DESC
-       LIMIT 200`
+       LIMIT 200`,
+      [req.user.schoolId]
     );
 
     return res.json({

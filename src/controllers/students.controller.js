@@ -15,13 +15,16 @@ function serialize(row) {
   };
 }
 
-// RF-18 — visualização consolidada dos alunos, com busca e filtros por
-// série, ano e situação. Somente leitura — a planilha da escola permanece
-// a única fonte de escrita (seção 5.7 do Documento de Escopo).
+// RF-18 — visualização consolidada dos alunos da própria escola, com
+// busca e filtros por série, ano e situação. Somente leitura — a
+// planilha da escola permanece a única fonte de escrita (seção 5.7 do
+// Documento de Escopo).
 async function list(req, res, next) {
   try {
     const { search, grade, situation, schoolYear } = req.query;
-    const { rows } = await pool.query('SELECT * FROM students ORDER BY name ASC');
+    const { rows } = await pool.query('SELECT * FROM students WHERE school_id = $1 ORDER BY name ASC', [
+      req.user.schoolId,
+    ]);
 
     let items = rows.map(serialize);
 
@@ -45,12 +48,15 @@ async function list(req, res, next) {
   }
 }
 
-// RF-19 — indicadores agregados da turma: frequência média e desempenho
-// geral (aqui, percentual de alunos em situação "Regular" — um indicador
-// simples e honesto, sem inventar uma nota composta que a escola não tem).
+// RF-19 — indicadores agregados da turma da própria escola: frequência
+// média e desempenho geral (aqui, percentual de alunos em situação
+// "Regular" — um indicador simples e honesto, sem inventar uma nota
+// composta que a escola não tem).
 async function summary(req, res, next) {
   try {
-    const { rows } = await pool.query('SELECT attendance, situation FROM students');
+    const { rows } = await pool.query('SELECT attendance, situation FROM students WHERE school_id = $1', [
+      req.user.schoolId,
+    ]);
 
     if (rows.length === 0) {
       return res.json({ totalStudents: 0, averageAttendance: 0, regularRate: 0 });
@@ -72,14 +78,16 @@ async function summary(req, res, next) {
 }
 
 // RF-17 — data/hora da última sincronização bem-sucedida e sinalização de
-// falhas.
+// falhas, da própria escola.
 async function syncStatus(req, res, next) {
   try {
     const { rows: lastSuccess } = await pool.query(
-      "SELECT * FROM sync_runs WHERE status = 'sucesso' ORDER BY created_at DESC LIMIT 1"
+      "SELECT * FROM sync_runs WHERE school_id = $1 AND status = 'sucesso' ORDER BY created_at DESC LIMIT 1",
+      [req.user.schoolId]
     );
     const { rows: lastRun } = await pool.query(
-      'SELECT * FROM sync_runs ORDER BY created_at DESC LIMIT 1'
+      'SELECT * FROM sync_runs WHERE school_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [req.user.schoolId]
     );
 
     return res.json({
@@ -98,12 +106,12 @@ async function syncStatus(req, res, next) {
   }
 }
 
-// RF-16 — disparo manual da sincronização (além da rotina periódica em
-// server.js), útil para testes e para o Administrador forçar uma
-// atualização imediata.
+// RF-16 — disparo manual da sincronização da própria escola (além da
+// rotina periódica em server.js, que percorre todas as escolas), útil
+// para testes e para o Administrador forçar uma atualização imediata.
 async function triggerSync(req, res, next) {
   try {
-    const result = await syncStudentsFromSheet();
+    const result = await syncStudentsFromSheet(req.user.schoolId);
     const status = result.status === 'sucesso' ? 200 : 502;
     return res.status(status).json(result);
   } catch (err) {

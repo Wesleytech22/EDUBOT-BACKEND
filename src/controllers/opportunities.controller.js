@@ -34,6 +34,9 @@ function validatePayload(body, { partial = false } = {}) {
   return null;
 }
 
+// Multi-escola — toda oportunidade pertence a uma única escola (a do
+// usuário logado); nenhuma consulta abaixo enxerga dados de outra escola.
+
 // RF-01 — cadastro unificado / RF-30 do mockup — validação dupla (front + back)
 async function create(req, res, next) {
   try {
@@ -44,10 +47,20 @@ async function create(req, res, next) {
 
     const { rows } = await pool.query(
       `INSERT INTO opportunities
-        (title, description, target_audience, deadline, link, attachment_name, is_draft, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        (title, description, target_audience, deadline, link, attachment_name, is_draft, created_by, school_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING *`,
-      [title, description, targetAudience, deadline, link || null, attachmentName || null, Boolean(isDraft), req.user.sub]
+      [
+        title,
+        description,
+        targetAudience,
+        deadline,
+        link || null,
+        attachmentName || null,
+        Boolean(isDraft),
+        req.user.sub,
+        req.user.schoolId,
+      ]
     );
 
     return res.status(201).json(serialize(rows[0]));
@@ -60,7 +73,10 @@ async function create(req, res, next) {
 async function list(req, res, next) {
   try {
     const { search, status, targetAudience } = req.query;
-    const { rows } = await pool.query('SELECT * FROM opportunities ORDER BY created_at DESC');
+    const { rows } = await pool.query(
+      'SELECT * FROM opportunities WHERE school_id = $1 ORDER BY created_at DESC',
+      [req.user.schoolId]
+    );
 
     let items = rows.map(serialize);
 
@@ -83,7 +99,10 @@ async function list(req, res, next) {
 
 async function getById(req, res, next) {
   try {
-    const { rows } = await pool.query('SELECT * FROM opportunities WHERE id = $1', [req.params.id]);
+    const { rows } = await pool.query('SELECT * FROM opportunities WHERE id = $1 AND school_id = $2', [
+      req.params.id,
+      req.user.schoolId,
+    ]);
     if (!rows[0]) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
     return res.json(serialize(rows[0]));
   } catch (err) {
@@ -97,7 +116,10 @@ async function update(req, res, next) {
     const error = validatePayload(req.body, { partial: true });
     if (error) return res.status(400).json({ error });
 
-    const { rows: existingRows } = await pool.query('SELECT * FROM opportunities WHERE id = $1', [req.params.id]);
+    const { rows: existingRows } = await pool.query(
+      'SELECT * FROM opportunities WHERE id = $1 AND school_id = $2',
+      [req.params.id, req.user.schoolId]
+    );
     if (!existingRows[0]) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
 
     const current = existingRows[0];
@@ -115,9 +137,9 @@ async function update(req, res, next) {
       `UPDATE opportunities SET
         title = $1, description = $2, target_audience = $3, deadline = $4,
         link = $5, attachment_name = $6, is_draft = $7, updated_at = now()
-       WHERE id = $8
+       WHERE id = $8 AND school_id = $9
        RETURNING *`,
-      [title, description, targetAudience, deadline, link, attachmentName, isDraft, req.params.id]
+      [title, description, targetAudience, deadline, link, attachmentName, isDraft, req.params.id, req.user.schoolId]
     );
 
     return res.json(serialize(rows[0]));
@@ -133,29 +155,35 @@ async function update(req, res, next) {
 // forma assíncrona pelo callback em POST /api/webhooks/n8n/dispatch-status.
 async function dispatch(req, res, next) {
   try {
-    const { rows: existingRows } = await pool.query('SELECT * FROM opportunities WHERE id = $1', [req.params.id]);
+    const { rows: existingRows } = await pool.query(
+      'SELECT * FROM opportunities WHERE id = $1 AND school_id = $2',
+      [req.params.id, req.user.schoolId]
+    );
     const current = existingRows[0];
     if (!current) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
     if (current.is_draft) return res.status(400).json({ error: 'Não é possível disparar um rascunho.' });
     if (current.dispatched_at) return res.status(400).json({ error: 'O disparo não pode ser cancelado nem repetido depois de iniciado.' });
 
-    const { rows: contacts } = await pool.query('SELECT * FROM contacts WHERE opt_in = true');
+    const { rows: contacts } = await pool.query(
+      'SELECT * FROM contacts WHERE school_id = $1 AND opt_in = true',
+      [req.user.schoolId]
+    );
     if (contacts.length === 0) {
       return res.status(400).json({ error: 'Nenhum contato com opt-in ativo para receber o disparo.' });
     }
 
     const { rows } = await pool.query(
       `UPDATE opportunities SET is_draft = false, dispatched_at = now(), updated_at = now()
-       WHERE id = $1 RETURNING *`,
-      [req.params.id]
+       WHERE id = $1 AND school_id = $2 RETURNING *`,
+      [req.params.id, req.user.schoolId]
     );
     const opportunity = serialize(rows[0]);
 
     const { rows: logRows } = await pool.query(
       `INSERT INTO dispatch_logs (opportunity_id, contact_id, status)
-       SELECT $1, id, 'pendente' FROM contacts WHERE opt_in = true
+       SELECT $1, id, 'pendente' FROM contacts WHERE school_id = $2 AND opt_in = true
        RETURNING *`,
-      [req.params.id]
+      [req.params.id, req.user.schoolId]
     );
 
     const logIdByContactId = new Map(logRows.map((l) => [l.contact_id, l.id]));
@@ -204,6 +232,12 @@ async function dispatch(req, res, next) {
 // status de entrega) de uma oportunidade já disparada.
 async function listDispatchLogs(req, res, next) {
   try {
+    const { rows: opportunityRows } = await pool.query(
+      'SELECT id FROM opportunities WHERE id = $1 AND school_id = $2',
+      [req.params.id, req.user.schoolId]
+    );
+    if (!opportunityRows[0]) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
+
     const { rows } = await pool.query(
       `SELECT dl.id, dl.status, dl.detail, dl.created_at, dl.updated_at,
               c.id AS contact_id, c.name AS contact_name, c.phone AS contact_phone
