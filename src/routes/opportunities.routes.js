@@ -6,10 +6,14 @@ const router = express.Router();
 
 router.use(requireAuth, requireRole('administrador', 'equipe_escola'));
 
+// Leitura: Administrador e Equipe da Escola.
 router.get('/', list);
 router.get('/:id', getById);
-router.post('/', create);
-router.put('/:id', update);
-router.patch('/:id/dispatch', dispatch);
+
+// Cadastro/edição/disparo: restrito ao Administrador (RF-20 — Equipe da
+// Escola não acessa ações de gestão, apenas consulta).
+router.post('/', requireRole('administrador'), create);
+router.put('/:id', requireRole('administrador'), update);
+router.patch('/:id/dispatch', requireRole('administrador'), dispatch);
 
 module.exports = router;
