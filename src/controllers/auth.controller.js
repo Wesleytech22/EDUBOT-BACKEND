@@ -4,6 +4,19 @@ const { signToken } = require('../utils/jwt');
 const { generateResetToken, hashResetToken } = require('../utils/resetToken');
 const { sendPasswordResetEmail } = require('../utils/mailer');
 
+// Login — proteção contra força bruta: bloqueia a conta por um tempo após
+// tentativas repetidas com senha errada.
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+
+function lockoutResponse(res, lockedUntil) {
+  const secondsLeft = Math.max(1, Math.ceil((new Date(lockedUntil).getTime() - Date.now()) / 1000));
+  res.set('Retry-After', String(secondsLeft));
+  return res.status(429).json({
+    error: `Muitas tentativas de login. Tente novamente em ${Math.ceil(secondsLeft / 60)} minuto(s).`,
+  });
+}
+
 // RF-20 — autenticação restrita à equipe da escola (Administrador / Equipe da Escola)
 async function login(req, res, next) {
   try {
@@ -20,9 +33,32 @@ async function login(req, res, next) {
       return res.status(401).json({ error: 'Credenciais inválidas.' });
     }
 
+    if (user.locked_until && new Date(user.locked_until) > new Date()) {
+      return lockoutResponse(res, user.locked_until);
+    }
+
     const matches = await bcrypt.compare(password, user.password_hash);
     if (!matches) {
+      const attempts = user.failed_login_attempts + 1;
+      const shouldLock = attempts >= MAX_FAILED_ATTEMPTS;
+      const lockedUntil = shouldLock ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;
+
+      await pool.query(
+        'UPDATE users SET failed_login_attempts = $1, locked_until = $2 WHERE id = $3',
+        [shouldLock ? 0 : attempts, lockedUntil, user.id]
+      );
+
+      if (shouldLock) {
+        return lockoutResponse(res, lockedUntil);
+      }
       return res.status(401).json({ error: 'Credenciais inválidas.' });
+    }
+
+    if (user.failed_login_attempts > 0 || user.locked_until) {
+      await pool.query(
+        'UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1',
+        [user.id]
+      );
     }
 
     const token = signToken(user);
