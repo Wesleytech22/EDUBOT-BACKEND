@@ -35,6 +35,8 @@ Contas criadas pelo seed (definidas em `.env`):
 | GET | `/api/health` | Healthcheck | Não |
 | POST | `/api/auth/login` | Login (RF-20) | Não |
 | GET | `/api/auth/me` | Dados do usuário logado | Sim |
+| POST | `/api/auth/forgot-password` | Gera token de redefinição e envia por e-mail (SMTP) | Não |
+| POST | `/api/auth/reset-password` | Troca a senha a partir do token | Não |
 | GET | `/api/opportunities?search=&status=&targetAudience=` | Lista com busca e filtros (RF-03) | Sim |
 | GET | `/api/opportunities/:id` | Detalhe | Sim |
 | POST | `/api/opportunities` | Cria (rascunho ou publicada) (RF-01) | Sim |
