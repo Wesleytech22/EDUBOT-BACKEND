@@ -8,7 +8,23 @@ const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:5173' }));
+// CORS_ORIGIN aceita uma ou mais origens separadas por vírgula
+// (ex.: "https://edubot.app,https://edubot-preview.vercel.app").
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Not allowed by CORS'));
+    },
+  })
+);
 app.use(express.json());
 app.use(morgan('dev'));
 

@@ -19,6 +19,11 @@ async function getTransporter() {
         auth: process.env.SMTP_USER
           ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
           : undefined,
+        // Falha em segundos em vez de travar a requisição indefinidamente
+        // quando o host/porta SMTP estiver incorreto ou inacessível.
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 10_000,
       })
     );
   } else {

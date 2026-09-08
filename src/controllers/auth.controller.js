@@ -9,6 +9,17 @@ const { sendPasswordResetEmail } = require('../utils/mailer');
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
 
+// URL do frontend usada para montar o link de redefinição de senha.
+// É separada de CORS_ORIGIN (que pode listar várias origens, separadas por
+// vírgula, para liberar CORS) — sem essa separação, um CORS_ORIGIN com mais
+// de uma origem gera um link quebrado. Configure FRONTEND_URL em produção;
+// na ausência dela, usa a primeira origem de CORS_ORIGIN como fallback.
+function getFrontendUrl() {
+  const configured =
+    process.env.FRONTEND_URL || (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',')[0];
+  return configured.trim().replace(/\/+$/, '');
+}
+
 function lockoutResponse(res, lockedUntil) {
   const secondsLeft = Math.max(1, Math.ceil((new Date(lockedUntil).getTime() - Date.now()) / 1000));
   res.set('Retry-After', String(secondsLeft));
@@ -101,8 +112,13 @@ async function forgotPassword(req, res, next) {
         [tokenHash, expiresAt, user.id]
       );
 
-      const resetLink = `${process.env.CORS_ORIGIN || 'http://localhost:5173'}/redefinir-senha?token=${token}`;
-      await sendPasswordResetEmail(email, resetLink);
+      const resetLink = `${getFrontendUrl()}/redefinir-senha?token=${token}`;
+
+      // Não usa await: o envio por SMTP não deve travar a resposta HTTP
+      // (um SMTP lento/indisponível não pode virar timeout para o cliente).
+      sendPasswordResetEmail(email, resetLink).catch((err) => {
+        console.error('[forgotPassword] falha ao enviar e-mail de redefinição:', err);
+      });
     }
 
     // Resposta genérica independente de o e-mail existir (evita enumeração de contas).
