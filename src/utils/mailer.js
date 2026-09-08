@@ -3,6 +3,8 @@ const net = require('net');
 const nodemailer = require('nodemailer');
 const { passwordResetEmail } = require('./emailTemplates');
 
+const RESEND_API_URL = 'https://api.resend.com/emails';
+
 let transporterPromise;
 
 // O nodemailer resolve o host SMTP com sua própria lógica (dns.resolve4/6,
@@ -17,10 +19,6 @@ async function resolveIPv4(hostname) {
   return address;
 }
 
-// RNF — em produção, SMTP_HOST/PORT/USER/PASS vêm de um provedor real
-// (SES, SendGrid, Mailgun etc.) configurado via .env. Sem essas variáveis
-// (ambiente local sem credenciais), cai para uma conta Ethereal de teste,
-// que também entrega por SMTP de verdade — só não sai da caixa de teste.
 async function getTransporter() {
   if (transporterPromise) return transporterPromise;
 
@@ -58,17 +56,12 @@ async function getTransporter() {
   return transporterPromise;
 }
 
-async function sendPasswordResetEmail(to, resetLink) {
+// Envio via SMTP (nodemailer) — usado quando não há RESEND_API_KEY. Serve
+// como opção para outros ambientes de hospedagem sem o bloqueio de saída
+// SMTP do Render, e como fallback de teste local (conta Ethereal).
+async function sendViaSmtp({ to, from, subject, text, html }) {
   const transporter = await getTransporter();
-  const { subject, text, html } = passwordResetEmail(resetLink);
-
-  const info = await transporter.sendMail({
-    from: process.env.MAIL_FROM || 'EduBot 🎓 <nao-responda@edubot.local>',
-    to,
-    subject,
-    text,
-    html,
-  });
+  const info = await transporter.sendMail({ from, to, subject, text, html });
 
   const previewUrl = nodemailer.getTestMessageUrl(info);
   if (previewUrl) {
@@ -76,6 +69,41 @@ async function sendPasswordResetEmail(to, resetLink) {
   }
 
   return info;
+}
+
+// Envio via API HTTP da Resend (porta 443) — usado em produção. Contorna o
+// bloqueio de saída SMTP (portas 25/465/587) comum em provedores como o
+// Render (confirmado nos logs: conexões SMTP para o Gmail travavam em
+// ENETUNREACH/timeout mesmo com o IPv4 resolvido corretamente).
+// Requer RESEND_API_KEY e, para enviar a qualquer destinatário (não só ao
+// próprio e-mail cadastrado na Resend), um domínio verificado em MAIL_FROM.
+async function sendViaResend({ to, from, subject, text, html }) {
+  const response = await fetch(RESEND_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ from, to, subject, text, html }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Resend respondeu ${response.status} ${response.statusText}: ${body}`);
+  }
+
+  return response.json();
+}
+
+async function sendPasswordResetEmail(to, resetLink) {
+  const { subject, text, html } = passwordResetEmail(resetLink);
+  const from = process.env.MAIL_FROM || 'EduBot 🎓 <nao-responda@edubot.local>';
+
+  if (process.env.RESEND_API_KEY) {
+    return sendViaResend({ to, from, subject, text, html });
+  }
+
+  return sendViaSmtp({ to, from, subject, text, html });
 }
 
 module.exports = { sendPasswordResetEmail };
