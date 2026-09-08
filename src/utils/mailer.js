@@ -3,7 +3,19 @@ const net = require('net');
 const nodemailer = require('nodemailer');
 const { passwordResetEmail } = require('./emailTemplates');
 
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 const RESEND_API_URL = 'https://api.resend.com/emails';
+
+// Extrai nome e e-mail de um remetente no formato "Nome <email>" ou só "email"
+// — a Brevo exige esses dois campos separados, diferente do formato usado
+// pelo nodemailer/Resend (uma única string).
+function parseFromAddress(from) {
+  const match = /^(.*?)<(.+)>$/.exec(from);
+  if (match) {
+    return { name: match[1].trim().replace(/^"|"$/g, ''), email: match[2].trim() };
+  }
+  return { name: undefined, email: from.trim() };
+}
 
 let transporterPromise;
 
@@ -95,9 +107,44 @@ async function sendViaResend({ to, from, subject, text, html }) {
   return response.json();
 }
 
+// Envio via API HTTP da Brevo (porta 443) — usado em produção. Não exige
+// domínio verificado: basta um e-mail remetente confirmado pelo painel da
+// Brevo (Senders, Domains & Dedicated IPs > Senders), o que evita todo o
+// processo de verificação de domínio via DNS que a Resend exige.
+async function sendViaBrevo({ to, from, subject, text, html }) {
+  const sender = parseFromAddress(from);
+
+  const response = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'api-key': process.env.BREVO_API_KEY,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      sender,
+      to: [{ email: to }],
+      subject,
+      textContent: text,
+      htmlContent: html,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Brevo respondeu ${response.status} ${response.statusText}: ${body}`);
+  }
+
+  return response.json();
+}
+
 async function sendPasswordResetEmail(to, resetLink) {
   const { subject, text, html } = passwordResetEmail(resetLink);
   const from = process.env.MAIL_FROM || 'EduBot 🎓 <nao-responda@edubot.local>';
+
+  if (process.env.BREVO_API_KEY) {
+    return sendViaBrevo({ to, from, subject, text, html });
+  }
 
   if (process.env.RESEND_API_KEY) {
     return sendViaResend({ to, from, subject, text, html });
