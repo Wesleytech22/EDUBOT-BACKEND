@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { passwordResetEmail } = require('./emailTemplates');
 
 let transporterPromise;
 
@@ -37,17 +38,14 @@ async function getTransporter() {
 
 async function sendPasswordResetEmail(to, resetLink) {
   const transporter = await getTransporter();
+  const { subject, text, html } = passwordResetEmail(resetLink);
 
   const info = await transporter.sendMail({
-    from: process.env.MAIL_FROM || 'EduBot <nao-responda@edubot.local>',
+    from: process.env.MAIL_FROM || 'EduBot 🎓 <nao-responda@edubot.local>',
     to,
-    subject: 'EduBot — Redefinição de senha',
-    text: `Recebemos um pedido para redefinir sua senha.\n\nAcesse o link a seguir para escolher uma nova senha (válido por 1 hora):\n${resetLink}\n\nSe você não solicitou isso, ignore este e-mail.`,
-    html: `
-      <p>Recebemos um pedido para redefinir sua senha.</p>
-      <p><a href="${resetLink}">Clique aqui para escolher uma nova senha</a> (válido por 1 hora).</p>
-      <p>Se você não solicitou isso, ignore este e-mail.</p>
-    `,
+    subject,
+    text,
+    html,
   });
 
   const previewUrl = nodemailer.getTestMessageUrl(info);
