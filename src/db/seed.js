@@ -34,8 +34,8 @@ const TEAM_MEMBERS = [
   },
   {
     name: 'Leonardo Oliveira Rocha',
-    role: 'Desenvolvedor Backend',
-    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Prefere resolver o problema na modelagem do banco antes que ele vire bug em produção.',
+    role: 'Desenvolvedor Frontend',
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Transforma o design do Figma em componentes React reutilizáveis, sem perder um pixel no caminho.',
     displayOrder: 3,
   },
   {
@@ -46,21 +46,15 @@ const TEAM_MEMBERS = [
   },
   {
     name: 'Nicolas Neris dos Santos Dourado',
-    role: 'Desenvolvedor de Integrações',
-    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Vive entre APIs, webhooks e filas — testa o caminho feliz e os outros doze caminhos infelizes também.',
+    role: 'QA',
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Encontra o bug que ninguém mais reproduziu, e depois escreve o teste pra ele nunca mais voltar.',
     displayOrder: 5,
   },
   {
     name: 'Gabriel Yanes',
-    role: 'Desenvolvedor & QA',
-    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Encontra o bug que ninguém mais reproduziu, e depois escreve o teste pra ele nunca mais voltar.',
-    displayOrder: 6,
-  },
-  {
-    name: 'Cauê Soares Valente',
     role: 'Desenvolvedor Backend',
-    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Entrou de olho na Sprint 03 e já assumiu parte da orquestração do broadcast via N8N.',
-    displayOrder: 7,
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Prefere resolver o problema na modelagem do banco antes que ele vire bug em produção.',
+    displayOrder: 6,
   },
 ];
 
@@ -92,6 +86,9 @@ async function seed() {
   for (const member of TEAM_MEMBERS) {
     await upsertTeamMember(member);
   }
+
+  // Cauê Soares Valente saiu do time — remove o card da tela "Sobre Nós".
+  await pool.query('DELETE FROM team_members WHERE name = $1', ['Cauê Soares Valente']);
 
   await pool.end();
 }
