@@ -21,6 +21,12 @@ async function upsertUser({ name, email, password, role }) {
 // photo_data_url num reseed, para não apagar uma foto já enviada pelo admin.
 const TEAM_MEMBERS = [
   {
+    name: 'José Roberto Ursino da Cruz',
+    role: 'Professor Orientador — Análise e Desenvolvimento de Sistemas',
+    bio: 'Docente da Universidade Cruzeiro do Sul responsável pela disciplina. Acompanha as sprints e cobra rigor de escopo antes que a equipe cobre de si mesma.',
+    displayOrder: 0,
+  },
+  {
     name: 'Wesley Rodrigues Dias',
     role: 'Scrum Master / Desenvolvedor Fullstack',
     bio: 'Cursando Análise e Desenvolvimento de Sistemas. Conduz as sprints e escreve o código ao mesmo tempo — acredita que a melhor forma de estimar uma tarefa é já ter começado ela.',
