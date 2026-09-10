@@ -4,6 +4,7 @@ const morgan = require('morgan');
 
 const authRoutes = require('./routes/auth.routes');
 const opportunitiesRoutes = require('./routes/opportunities.routes');
+const teamRoutes = require('./routes/team.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -32,6 +33,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', sprint: '02' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/opportunities', opportunitiesRoutes);
+app.use('/api/team', teamRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

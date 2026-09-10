@@ -16,6 +16,64 @@ async function upsertUser({ name, email, password, role }) {
   console.log(`Usuário pronto: ${email} (${role})`);
 }
 
+// Tela "Sobre Nós" — créditos da equipe (Universidade Cruzeiro do Sul,
+// curso de Análise e Desenvolvimento de Sistemas). Não sobrescreve
+// photo_data_url num reseed, para não apagar uma foto já enviada pelo admin.
+const TEAM_MEMBERS = [
+  {
+    name: 'Wesley Rodrigues Dias',
+    role: 'Scrum Master / Desenvolvedor Fullstack',
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Conduz as sprints e escreve o código ao mesmo tempo — acredita que a melhor forma de estimar uma tarefa é já ter começado ela.',
+    displayOrder: 1,
+  },
+  {
+    name: 'Luana Aparecida Silva Che',
+    role: 'Product Owner',
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Traduz o que a escola precisa em requisito, prioriza o backlog e ainda encontra tempo pra revisar arquitetura com o time.',
+    displayOrder: 2,
+  },
+  {
+    name: 'Leonardo Oliveira Rocha',
+    role: 'Desenvolvedor Backend',
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Prefere resolver o problema na modelagem do banco antes que ele vire bug em produção.',
+    displayOrder: 3,
+  },
+  {
+    name: 'Clayton de Andrade Junior',
+    role: 'Desenvolvedor Frontend',
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Não descansa enquanto o pixel não bate com o Figma — e o console não fica limpo de warnings.',
+    displayOrder: 4,
+  },
+  {
+    name: 'Nicolas Neris dos Santos Dourado',
+    role: 'Desenvolvedor de Integrações',
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Vive entre APIs, webhooks e filas — testa o caminho feliz e os outros doze caminhos infelizes também.',
+    displayOrder: 5,
+  },
+  {
+    name: 'Gabriel Yanes',
+    role: 'Desenvolvedor & QA',
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Encontra o bug que ninguém mais reproduziu, e depois escreve o teste pra ele nunca mais voltar.',
+    displayOrder: 6,
+  },
+  {
+    name: 'Cauê Soares Valente',
+    role: 'Desenvolvedor Backend',
+    bio: 'Cursando Análise e Desenvolvimento de Sistemas. Entrou de olho na Sprint 03 e já assumiu parte da orquestração do broadcast via N8N.',
+    displayOrder: 7,
+  },
+];
+
+async function upsertTeamMember({ name, role, bio, displayOrder }) {
+  await pool.query(
+    `INSERT INTO team_members (name, role, bio, display_order)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (name) DO UPDATE SET role = EXCLUDED.role, bio = EXCLUDED.bio, display_order = EXCLUDED.display_order, updated_at = now()`,
+    [name, role, bio, displayOrder]
+  );
+  console.log(`Membro da equipe pronto: ${name} (${role})`);
+}
+
 async function seed() {
   await upsertUser({
     name: 'Coordenação Pedagógica',
@@ -30,6 +88,10 @@ async function seed() {
     password: process.env.SEED_EQUIPE_PASSWORD || 'EduBot@2026',
     role: 'equipe_escola',
   });
+
+  for (const member of TEAM_MEMBERS) {
+    await upsertTeamMember(member);
+  }
 
   await pool.end();
 }
