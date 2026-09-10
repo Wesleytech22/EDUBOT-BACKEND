@@ -4,7 +4,7 @@
 // falha, e o disparo pode ser diagnosticado pelos logs (RF-06).
 const N8N_TIMEOUT_MS = 5000;
 
-async function triggerBroadcastWorkflow({ opportunity, contacts, callbackUrl }) {
+async function triggerBroadcastWorkflow({ opportunity, contacts, message, callbackUrl }) {
   const webhookUrl = process.env.N8N_WEBHOOK_URL;
 
   if (!webhookUrl) {
@@ -18,7 +18,7 @@ async function triggerBroadcastWorkflow({ opportunity, contacts, callbackUrl }) 
     const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ opportunity, contacts, callbackUrl }),
+      body: JSON.stringify({ opportunity, contacts, message, callbackUrl }),
       signal: controller.signal,
     });
 

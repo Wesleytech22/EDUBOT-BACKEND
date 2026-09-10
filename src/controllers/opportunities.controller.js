@@ -1,7 +1,6 @@
 const pool = require('../db/pool');
 const { classifyStatus } = require('../utils/classifyStatus');
 const { triggerBroadcastWorkflow, buildBroadcastMessage } = require('../utils/n8n');
-const { hasAttachment } = require('./opportunityAttachments.controller');
 
 function serialize(row) {
   return {
@@ -209,6 +208,9 @@ async function dispatch(req, res, next) {
 // status de entrega) de uma oportunidade já disparada.
 async function listDispatchLogs(req, res, next) {
   try {
+    const { rows: oppRows } = await pool.query('SELECT id FROM opportunities WHERE id = $1', [req.params.id]);
+    if (!oppRows[0]) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
+
     const { rows } = await pool.query(
       `SELECT dl.id, dl.status, dl.detail, dl.created_at, dl.updated_at,
               c.id AS contact_id, c.name AS contact_name, c.phone AS contact_phone

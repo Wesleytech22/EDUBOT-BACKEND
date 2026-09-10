@@ -1,7 +1,5 @@
 const express = require('express');
-const multer = require('multer');
 const { create, list, getById, update, dispatch, listDispatchLogs } = require('../controllers/opportunities.controller');
-const attachments = require('../controllers/opportunityAttachments.controller');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 // Anexo da oportunidade (RF-01): PDF, PNG ou JPG de até 5 MB.
@@ -33,7 +31,6 @@ router.use(requireAuth, requireRole('administrador', 'equipe_escola'));
 router.get('/', list);
 router.get('/:id', getById);
 router.get('/:id/dispatch-logs', listDispatchLogs);
-router.get('/:id/attachment', attachments.download);
 
 // Cadastro/edição/disparo: restrito ao Administrador (RF-20 — Equipe da
 // Escola não acessa ações de gestão, apenas consulta).

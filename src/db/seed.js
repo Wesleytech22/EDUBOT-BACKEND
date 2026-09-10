@@ -84,6 +84,7 @@ async function upsertContact({ phone, name }) {
      ON CONFLICT (phone) DO NOTHING`,
     [phone, name]
   );
+  console.log(`Contato de teste pronto: ${name} (${phone})`);
 }
 
 async function seed() {
@@ -110,7 +111,6 @@ async function seed() {
 
   await upsertContact({ phone: '+5511999990001', name: 'Aluno de teste 1' });
   await upsertContact({ phone: '+5511999990002', name: 'Responsável de teste 2' });
-  console.log('Contatos de teste prontos (RF-04).');
 
   await pool.end();
 }

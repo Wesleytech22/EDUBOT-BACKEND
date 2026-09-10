@@ -6,9 +6,6 @@ const authRoutes = require('./routes/auth.routes');
 const opportunitiesRoutes = require('./routes/opportunities.routes');
 const teamRoutes = require('./routes/team.routes');
 const webhooksRoutes = require('./routes/webhooks.routes');
-const supportRoutes = require('./routes/support.routes');
-const metricsRoutes = require('./routes/metrics.routes');
-const integrationsRoutes = require('./routes/integrations.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -33,15 +30,12 @@ app.use(
 app.use(express.json());
 app.use(morgan('dev'));
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', sprint: '05' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', sprint: '03' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/opportunities', opportunitiesRoutes);
 app.use('/api/team', teamRoutes);
 app.use('/api/webhooks', webhooksRoutes);
-app.use('/api/support-requests', supportRoutes);
-app.use('/api/metrics', metricsRoutes);
-app.use('/api/integrations', integrationsRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
