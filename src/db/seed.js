@@ -74,6 +74,19 @@ async function upsertTeamMember({ name, role, bio, displayOrder }) {
   console.log(`Membro da equipe pronto: ${name} (${role})`);
 }
 
+// RF-04 — contatos de exemplo para exercitar o broadcast em ambiente local.
+// O cadastro real de opt-in pelo próprio WhatsApp (RF-10) chega no Módulo D,
+// na Sprint 04 — até lá, esta é a única forma de povoar a lista de envio.
+async function upsertContact({ phone, name }) {
+  await pool.query(
+    `INSERT INTO contacts (phone, name, opt_in)
+     VALUES ($1, $2, true)
+     ON CONFLICT (phone) DO NOTHING`,
+    [phone, name]
+  );
+  console.log(`Contato de teste pronto: ${name} (${phone})`);
+}
+
 async function seed() {
   await upsertUser({
     name: 'Coordenação Pedagógica',
@@ -95,6 +108,9 @@ async function seed() {
 
   // Cauê Soares Valente saiu do time — remove o card da tela "Sobre Nós".
   await pool.query('DELETE FROM team_members WHERE name = $1', ['Cauê Soares Valente']);
+
+  await upsertContact({ phone: '+5511999990001', name: 'Aluno de teste 1' });
+  await upsertContact({ phone: '+5511999990002', name: 'Responsável de teste 2' });
 
   await pool.end();
 }
