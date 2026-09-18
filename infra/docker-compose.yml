@@ -32,6 +32,8 @@ services:
       - N8N_PROTOCOL=http
       - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
       - GENERIC_TIMEZONE=America/Sao_Paulo
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:
@@ -46,6 +48,7 @@ services:
       - WHATSAPP_API_KEY=${WAHA_API_KEY:-changeme}
       - WHATSAPP_HOOK_URL=${WAHA_HOOK_URL:-http://n8n:5678/webhook/waha}
       - WHATSAPP_HOOK_EVENTS=message,message.any
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
     volumes:
       - waha_data:/app/.sessions
     depends_on:
