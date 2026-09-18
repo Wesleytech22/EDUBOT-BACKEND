@@ -28,3 +28,17 @@ docker compose up -d
   nunca reutilize em produção (RNF-08).
 - Depois de subir o Postgres, rode as migrations do backend normalmente
   (`npm run migrate` na raiz do repositório).
+- O container do N8N precisa de `extra_hosts: host.docker.internal:host-gateway`
+  para conseguir chamar de volta o backend rodando fora do Docker (callback de
+  `POST /api/webhooks/n8n/dispatch-status`, RF-06). Sem isso o N8N recebe
+  `ENOTFOUND` ao tentar acessar `host.docker.internal`.
+- O engine padrão da WAHA está fixado em `WHATSAPP_DEFAULT_ENGINE=GOWS`
+  (whatsmeow) — os engines `WEBJS` (trava no refresh do QR) e `NOWEB`
+  (Baileys) foram testados e descartados.
+- **Pendência conhecida:** o pareamento de um WhatsApp real via QR code vem
+  sendo bloqueado pelo próprio WhatsApp (erro "verifique sua conexão" no
+  celular), testado nos três engines e em duas redes diferentes — não é bug
+  da nossa infra, é uma medida anti-abuso contra bibliotecas não-oficiais
+  (Baileys/whatsmeow/whatsapp-web.js). O fluxo de broadcast (Sprint 03) foi
+  validado ponta a ponta com um workflow de N8N que simula o envio (mock),
+  sem depender do WhatsApp real estar conectado.

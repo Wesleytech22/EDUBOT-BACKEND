@@ -48,7 +48,7 @@ services:
       - WHATSAPP_API_KEY=${WAHA_API_KEY:-changeme}
       - WHATSAPP_HOOK_URL=${WAHA_HOOK_URL:-http://n8n:5678/webhook/waha}
       - WHATSAPP_HOOK_EVENTS=message,message.any
-      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      - WHATSAPP_DEFAULT_ENGINE=GOWS
     volumes:
       - waha_data:/app/.sessions
     depends_on:
