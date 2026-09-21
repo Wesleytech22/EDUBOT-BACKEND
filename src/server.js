@@ -8,9 +8,12 @@ const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
 const app = require('./app');
+const { startBackupJob } = require('./jobs/backupJob');
 
 const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {
   console.log(`EduBot API (Sprint 02) rodando em http://localhost:${PORT}`);
 });
+
+startBackupJob();
