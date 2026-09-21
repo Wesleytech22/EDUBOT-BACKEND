@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { classifyStatus } = require('../utils/classifyStatus');
+const { triggerBroadcastWorkflow, buildBroadcastMessage } = require('../utils/n8n');
 
 function serialize(row) {
   return {
@@ -125,9 +126,11 @@ async function update(req, res, next) {
   }
 }
 
-// RF-05 (restrito à S02, ver retro slide 9): o botão "Disparar" apenas
-// altera o status/registro no banco. A orquestração do webhook para o N8N
-// só é acoplada na Sprint 03 — nenhuma mensagem real é enviada aqui.
+// RF-04, RF-05 — dispara o broadcast para todos os contatos com opt-in
+// ativo, acionado diretamente do painel, sem edição manual da mensagem.
+// O envio efetivo é responsabilidade do workflow do N8N/WAHA; aqui o
+// backend só aciona o webhook e prepara o log (RF-06), que é atualizado de
+// forma assíncrona pelo callback em POST /api/webhooks/n8n/dispatch-status.
 async function dispatch(req, res, next) {
   try {
     const { rows: existingRows } = await pool.query('SELECT * FROM opportunities WHERE id = $1', [req.params.id]);
@@ -136,21 +139,94 @@ async function dispatch(req, res, next) {
     if (current.is_draft) return res.status(400).json({ error: 'Não é possível disparar um rascunho.' });
     if (current.dispatched_at) return res.status(400).json({ error: 'O disparo não pode ser cancelado nem repetido depois de iniciado.' });
 
+    const { rows: contacts } = await pool.query('SELECT * FROM contacts WHERE opt_in = true');
+    if (contacts.length === 0) {
+      return res.status(400).json({ error: 'Nenhum contato com opt-in ativo para receber o disparo.' });
+    }
+
     const { rows } = await pool.query(
       `UPDATE opportunities SET is_draft = false, dispatched_at = now(), updated_at = now()
        WHERE id = $1 RETURNING *`,
       [req.params.id]
     );
+    const opportunity = serialize(rows[0]);
+
+    const { rows: logRows } = await pool.query(
+      `INSERT INTO dispatch_logs (opportunity_id, contact_id, status)
+       SELECT $1, id, 'pendente' FROM contacts WHERE opt_in = true
+       RETURNING *`,
+      [req.params.id]
+    );
+
+    const logIdByContactId = new Map(logRows.map((l) => [l.contact_id, l.id]));
+
+    const callbackUrl = `${req.protocol}://${req.get('host')}/api/webhooks/n8n/dispatch-status`;
+    const result = await triggerBroadcastWorkflow({
+      opportunity,
+      contacts: contacts.map((c) => ({
+        logId: logIdByContactId.get(c.id),
+        phone: c.phone,
+        name: c.name,
+      })),
+      message: buildBroadcastMessage(opportunity),
+      callbackUrl,
+    });
+
+    // Sem N8N acessível (dev/CI), os logs seguem marcados de imediato — em
+    // produção o callback do workflow é quem resolve 'pendente' (RF-06).
+    if (!result.ok) {
+      await pool.query(
+        `UPDATE dispatch_logs SET status = 'falha', detail = $1, updated_at = now()
+         WHERE id = ANY($2::int[])`,
+        [result.error, logRows.map((l) => l.id)]
+      );
+    }
 
     await pool.query(
       'INSERT INTO logs (type, user_id, opportunity_id, detail) VALUES ($1,$2,$3,$4)',
-      ['disparo', req.user.sub, req.params.id, 'Status de disparo atualizado no banco (RF-05 restrito à S02 — sem envio real via N8N/WAHA)']
+      [
+        'disparo',
+        req.user.sub,
+        req.params.id,
+        result.ok
+          ? `Broadcast acionado no N8N para ${contacts.length} contato(s).`
+          : `Broadcast acionado, mas o N8N não confirmou o recebimento: ${result.error}`,
+      ]
     );
 
-    return res.json(serialize(rows[0]));
+    return res.json({ ...opportunity, dispatchLogsCreated: logRows.length, n8n: result });
   } catch (err) {
     return next(err);
   }
 }
 
-module.exports = { create, list, getById, update, dispatch };
+// RF-06 — consulta do log de envio (destinatário, oportunidade, data/hora e
+// status de entrega) de uma oportunidade já disparada.
+async function listDispatchLogs(req, res, next) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT dl.id, dl.status, dl.detail, dl.created_at, dl.updated_at,
+              c.id AS contact_id, c.name AS contact_name, c.phone AS contact_phone
+       FROM dispatch_logs dl
+       JOIN contacts c ON c.id = dl.contact_id
+       WHERE dl.opportunity_id = $1
+       ORDER BY dl.created_at ASC`,
+      [req.params.id]
+    );
+
+    return res.json({
+      items: rows.map((row) => ({
+        id: row.id,
+        status: row.status,
+        detail: row.detail,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        contact: { id: row.contact_id, name: row.contact_name, phone: row.contact_phone },
+      })),
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = { create, list, getById, update, dispatch, listDispatchLogs };
