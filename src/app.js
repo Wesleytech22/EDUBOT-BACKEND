@@ -6,6 +6,7 @@ const authRoutes = require('./routes/auth.routes');
 const opportunitiesRoutes = require('./routes/opportunities.routes');
 const teamRoutes = require('./routes/team.routes');
 const webhooksRoutes = require('./routes/webhooks.routes');
+const metricsRoutes = require('./routes/metrics.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -36,6 +37,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/opportunities', opportunitiesRoutes);
 app.use('/api/team', teamRoutes);
 app.use('/api/webhooks', webhooksRoutes);
+app.use('/api/metrics', metricsRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

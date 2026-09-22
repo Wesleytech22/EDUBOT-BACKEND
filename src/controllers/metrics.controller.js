@@ -1,19 +1,47 @@
 const pool = require('../db/pool');
 
-// RF-12 — métricas de envio, com rastreabilidade total.
-async function getDispatchMetrics() {
+function buildFilters({ opportunityId, from, to }) {
+  const conditions = [];
+  const params = [];
+
+  if (opportunityId) {
+    params.push(opportunityId);
+    conditions.push(`dl.opportunity_id = $${params.length}`);
+  }
+  if (from) {
+    params.push(from);
+    conditions.push(`dl.created_at >= $${params.length}`);
+  }
+  if (to) {
+    params.push(to);
+    conditions.push(`dl.created_at <= $${params.length}`);
+  }
+
+  return { conditions, params };
+}
+
+// RF-37 — métricas de envio, recortáveis por oportunidade e por período
+// (Tela 06). Escopo Sprint 03: só dados reais de disparo (dispatch_logs).
+// Dúvidas frequentes e taxa de resposta (RF-39) dependem do chatbot
+// (Módulo C/D), entregue na Sprint 04 — por isso "chatbot" volta null.
+async function getDispatchMetrics(filters) {
+  const { conditions, params } = buildFilters(filters);
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
   const { rows } = await pool.query(
-    `SELECT status, COUNT(*)::int AS count FROM dispatch_logs GROUP BY status`
+    `SELECT dl.status, COUNT(*)::int AS count FROM dispatch_logs dl ${where} GROUP BY dl.status`,
+    params
   );
   const byStatus = { pendente: 0, enviado: 0, falha: 0 };
   rows.forEach((r) => {
     byStatus[r.status] = r.count;
   });
-
   const totalSent = byStatus.pendente + byStatus.enviado + byStatus.falha;
 
+  const reachedConditions = [...conditions, `dl.status = 'enviado'`];
   const { rows: reachedRows } = await pool.query(
-    `SELECT COUNT(DISTINCT contact_id)::int AS count FROM dispatch_logs WHERE status = 'enviado'`
+    `SELECT COUNT(DISTINCT dl.contact_id)::int AS count FROM dispatch_logs dl WHERE ${reachedConditions.join(' AND ')}`,
+    params
   );
 
   return {
@@ -26,86 +54,55 @@ async function getDispatchMetrics() {
   };
 }
 
-// RF-13 — métricas de interação: dúvidas mais frequentes, taxa de
-// respostas recebidas e oportunidades com maior engajamento.
-async function getInteractionMetrics() {
-  const { rows: intentRows } = await pool.query(
-    `SELECT intent, COUNT(*)::int AS count FROM chat_interactions GROUP BY intent`
+// RF-38 — envios por semana com o status de entrega consolidado, para o
+// gráfico da Tela 06.
+async function getWeeklySeries(filters) {
+  const { conditions, params } = buildFilters(filters);
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const { rows } = await pool.query(
+    `SELECT date_trunc('week', dl.created_at)::date AS week, dl.status, COUNT(*)::int AS count
+     FROM dispatch_logs dl
+     ${where}
+     GROUP BY week, dl.status
+     ORDER BY week ASC`,
+    params
   );
-  const byIntent = {};
-  intentRows.forEach((r) => {
-    byIntent[r.intent] = r.count;
+
+  const byWeek = new Map();
+  rows.forEach((r) => {
+    const key = r.week.toISOString().slice(0, 10);
+    if (!byWeek.has(key)) byWeek.set(key, { week: key, enviado: 0, falha: 0, pendente: 0 });
+    byWeek.get(key)[r.status] = r.count;
   });
-  const faqResolved = byIntent.faq_match || 0;
-  const escalated = byIntent.escalated || 0;
-  const totalQuestions = faqResolved + escalated;
 
-  const { rows: respondersRows } = await pool.query(
-    `SELECT COUNT(DISTINCT contact_id)::int AS count
-     FROM chat_interactions
-     WHERE intent NOT IN ('blocked_no_optin')`
-  );
-  const { rows: reachedRows } = await pool.query(
-    `SELECT COUNT(DISTINCT contact_id)::int AS count FROM dispatch_logs WHERE status = 'enviado'`
-  );
-  const contactsReached = reachedRows[0].count;
-  const respondersCount = respondersRows[0].count;
-
-  const { rows: frequentQuestions } = await pool.query(
-    `SELECT lower(trim(message)) AS message, COUNT(*)::int AS count
-     FROM chat_interactions
-     WHERE intent IN ('faq_match', 'escalated')
-     GROUP BY lower(trim(message))
-     ORDER BY count DESC
-     LIMIT 5`
-  );
-
-  const { rows: engagementRows } = await pool.query(
-    `SELECT
-       o.id,
-       o.title,
-       COUNT(DISTINCT dl.contact_id) FILTER (WHERE dl.status = 'enviado') AS sent_to,
-       COUNT(DISTINCT ci.contact_id) AS asked_about
-     FROM opportunities o
-     LEFT JOIN dispatch_logs dl ON dl.opportunity_id = o.id
-     LEFT JOIN chat_interactions ci ON ci.opportunity_id = o.id AND ci.intent = 'faq_match'
-     WHERE o.dispatched_at IS NOT NULL
-     GROUP BY o.id, o.title
-     ORDER BY asked_about DESC, sent_to DESC
-     LIMIT 5`
-  );
-
-  return {
-    totalInteractions: Object.values(byIntent).reduce((a, b) => a + b, 0),
-    faqResolved,
-    escalated,
-    automationRate: totalQuestions > 0 ? Math.round((faqResolved / totalQuestions) * 100) : 0,
-    responseRate: contactsReached > 0 ? Math.round((respondersCount / contactsReached) * 100) : 0,
-    topFrequentQuestions: frequentQuestions.map((r) => ({ message: r.message, count: r.count })),
-    topEngagementOpportunities: engagementRows.map((r) => ({
-      id: r.id,
-      title: r.title,
-      sentTo: Number(r.sent_to),
-      askedAbout: Number(r.asked_about),
-      engagementRate: Number(r.sent_to) > 0 ? Math.round((Number(r.asked_about) / Number(r.sent_to)) * 100) : 0,
-    })),
-  };
+  return [...byWeek.values()];
 }
 
-// RF-12, RF-13 — painel de métricas consolidado (Módulo E).
+// RF-37, RF-38 — painel de métricas consolidado (Tela 06).
 async function getOverview(req, res, next) {
   try {
-    const [dispatch, chatbot] = await Promise.all([getDispatchMetrics(), getInteractionMetrics()]);
-    return res.json({ dispatch, chatbot });
+    const { opportunityId, from, to } = req.query;
+    const filters = { opportunityId, from, to };
+    const [dispatch, weeklySeries] = await Promise.all([
+      getDispatchMetrics(filters),
+      getWeeklySeries(filters),
+    ]);
+    return res.json({ dispatch, weeklySeries, chatbot: null });
   } catch (err) {
     return next(err);
   }
 }
 
-// RF-12 — status de entrega de cada notificação, através de todas as
-// oportunidades (rastreabilidade total, RNF-07).
+// RF-37 — status de entrega de cada notificação, através de todas as
+// oportunidades (rastreabilidade total, RNF-07), recortável por
+// oportunidade e por período.
 async function listAllDispatchLogs(req, res, next) {
   try {
+    const { opportunityId, from, to } = req.query;
+    const { conditions, params } = buildFilters({ opportunityId, from, to });
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
     const { rows } = await pool.query(
       `SELECT dl.id, dl.status, dl.detail, dl.created_at, dl.updated_at,
               o.id AS opportunity_id, o.title AS opportunity_title,
@@ -113,8 +110,10 @@ async function listAllDispatchLogs(req, res, next) {
        FROM dispatch_logs dl
        JOIN opportunities o ON o.id = dl.opportunity_id
        JOIN contacts c ON c.id = dl.contact_id
+       ${where}
        ORDER BY dl.created_at DESC
-       LIMIT 200`
+       LIMIT 200`,
+      params
     );
 
     return res.json({
