@@ -130,6 +130,7 @@ async function handleUpdate(update) {
     phone: contact.phone,
     name: contact.name,
     message: command || text,
+    origin: 'telegram',
   });
   await sendMessage(chatId, reply);
 }

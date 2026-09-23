@@ -19,10 +19,11 @@ async function findOrCreateContact(phone, name) {
   return created[0];
 }
 
-async function registerConsent(contactId, type) {
+// origin: canal por onde o consentimento chegou ('whatsapp' ou 'telegram').
+async function registerConsent(contactId, type, origin) {
   await pool.query(
     'INSERT INTO consent_logs (contact_id, type, origin) VALUES ($1, $2, $3)',
-    [contactId, type, 'whatsapp']
+    [contactId, type, origin]
   );
 }
 
@@ -88,7 +89,7 @@ async function matchOpportunityByTitle(message, activeOpportunities) {
 // encaminhamento humano), independente do canal: recebe a mensagem de um
 // contato (identificado pelo telefone) e devolve { reply } com o texto a
 // enviar de volta. Usado pelo webhook do N8N/WAHA e pelo bot do Telegram.
-async function processInboundMessage({ phone, name, message }) {
+async function processInboundMessage({ phone, name, message, origin = 'whatsapp' }) {
   const contact = await findOrCreateContact(phone, name);
   const command = matchCommand(message);
 
@@ -96,7 +97,7 @@ async function processInboundMessage({ phone, name, message }) {
     await logMessage(contact.id, message, 'opt_in');
     if (!contact.opt_in) {
       await pool.query('UPDATE contacts SET opt_in = true WHERE id = $1', [contact.id]);
-      await registerConsent(contact.id, 'opt_in');
+      await registerConsent(contact.id, 'opt_in', origin);
     }
     return {
       reply:
@@ -109,7 +110,7 @@ async function processInboundMessage({ phone, name, message }) {
     if (contact.opt_in) {
       await pool.query('UPDATE contacts SET opt_in = false WHERE id = $1', [contact.id]);
     }
-    await registerConsent(contact.id, 'opt_out');
+    await registerConsent(contact.id, 'opt_out', origin);
     return {
       reply: 'Você não receberá mais notificações. Envie ENTRAR a qualquer momento para voltar a receber.',
     };
