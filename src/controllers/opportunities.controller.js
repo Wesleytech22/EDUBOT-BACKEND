@@ -75,7 +75,9 @@ async function list(req, res, next) {
     if (status && status !== 'Todas') {
       items = items.filter((o) => o.status === status);
     }
-    if (targetAudience && targetAudience !== 'Todos') {
+    // "Todos" também é um público-alvo válido de oportunidade: sem o
+    // parâmetro, não há filtro; com ele, o filtro é exato.
+    if (targetAudience) {
       items = items.filter((o) => o.targetAudience === targetAudience);
     }
 
