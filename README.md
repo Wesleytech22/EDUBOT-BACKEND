@@ -69,7 +69,14 @@ calculado automaticamente a partir de `deadline` (RF-03).
 
 Cadastro de contatos: RF-10 (opt-in pelo próprio WhatsApp) só chega no
 Módulo D, na Sprint 04. Até lá, `npm run seed` povoa dois contatos de teste
-para o broadcast poder ser exercitado localmente.
+para o broadcast poder ser exercitado localmente — só com
+`SEED_TEST_CONTACTS=true` no `.env`, para que números fictícios nunca entrem
+na lista de envio de produção.
+
+Deploy em produção: rode `npm run migrate` (cria `contacts` e
+`dispatch_logs`) **antes** de publicar o frontend desta Sprint, e configure
+`N8N_WEBHOOK_URL`/`N8N_WEBHOOK_SECRET`. Sem contatos com opt-in, o disparo é
+recusado com "Nenhum contato com opt-in ativo" (a oportunidade não é alterada).
 
 ## Como testar (critérios de aceite, seção 9 do Documento de Escopo)
 
