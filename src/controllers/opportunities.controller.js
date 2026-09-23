@@ -1,6 +1,7 @@
 const pool = require('../db/pool');
 const { classifyStatus } = require('../utils/classifyStatus');
 const { triggerBroadcastWorkflow, buildBroadcastMessage } = require('../utils/n8n');
+const { hasAttachment } = require('./opportunityAttachments.controller');
 
 function serialize(row) {
   return {
@@ -11,6 +12,7 @@ function serialize(row) {
     deadline: row.deadline,
     link: row.link,
     attachmentName: row.attachment_name,
+    hasAttachment: Boolean(row.has_attachment),
     isDraft: row.is_draft,
     dispatchedAt: row.dispatched_at,
     status: classifyStatus(row),
@@ -40,14 +42,16 @@ async function create(req, res, next) {
     const error = validatePayload(req.body);
     if (error) return res.status(400).json({ error });
 
-    const { title, description, targetAudience, deadline, link, attachmentName, isDraft } = req.body;
+    const { title, description, targetAudience, deadline, link, isDraft } = req.body;
 
+    // O nome do anexo (attachment_name) é definido pelo upload do arquivo em
+    // PUT /opportunities/:id/attachment, não pelo formulário.
     const { rows } = await pool.query(
       `INSERT INTO opportunities
-        (title, description, target_audience, deadline, link, attachment_name, is_draft, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        (title, description, target_audience, deadline, link, is_draft, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING *`,
-      [title, description, targetAudience, deadline, link || null, attachmentName || null, Boolean(isDraft), req.user.sub]
+      [title, description, targetAudience, deadline, link || null, Boolean(isDraft), req.user.sub]
     );
 
     return res.status(201).json(serialize(rows[0]));
@@ -85,7 +89,7 @@ async function getById(req, res, next) {
   try {
     const { rows } = await pool.query('SELECT * FROM opportunities WHERE id = $1', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
-    return res.json(serialize(rows[0]));
+    return res.json(serialize({ ...rows[0], has_attachment: await hasAttachment(rows[0].id) }));
   } catch (err) {
     return next(err);
   }
@@ -115,17 +119,16 @@ async function update(req, res, next) {
       targetAudience = current.target_audience,
       deadline = current.deadline,
       link = current.link,
-      attachmentName = current.attachment_name,
       isDraft = current.is_draft,
     } = req.body;
 
     const { rows } = await pool.query(
       `UPDATE opportunities SET
         title = $1, description = $2, target_audience = $3, deadline = $4,
-        link = $5, attachment_name = $6, is_draft = $7, updated_at = now()
-       WHERE id = $8
+        link = $5, is_draft = $6, updated_at = now()
+       WHERE id = $7
        RETURNING *`,
-      [title, description, targetAudience, deadline, link, attachmentName, isDraft, req.params.id]
+      [title, description, targetAudience, deadline, link, isDraft, req.params.id]
     );
 
     return res.json(serialize(rows[0]));
