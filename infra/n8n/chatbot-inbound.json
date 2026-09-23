@@ -1,0 +1,221 @@
+{
+  "id": "EduBotInboundWA1",
+  "name": "EduBot - Chatbot (mensagens recebidas WAHA)",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "waha",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "b6f0c7e2-1d3a-4c55-9a21-0f5e2c7a1001",
+      "name": "Webhook WAHA",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "4d1f7a8e-6b2c-4e0f-8f3a-2a9c1e7b5001"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Normaliza o evento da WAHA (ou um payload de teste { phone, message }).\n// Mensagens do próprio número, de grupos e eventos que não são mensagem saem\n// como { ignorado: true } — o webhook responde 200 e a WAHA não reenvia.\nconst body = $input.first().json.body || {};\nlet phone, name, message, chatId;\n\nif (body.event) {\n  const p = body.payload || {};\n  if (!['message', 'message.any'].includes(body.event) || p.fromMe || !p.body) return [{ json: { ignorado: true } }];\n  chatId = p.from;\n  if (!chatId || chatId.endsWith('@g.us')) return [{ json: { ignorado: true } }]; // grupos ficam de fora\n  phone = '+' + chatId.split('@')[0];\n  name = (p._data && (p._data.notifyName || p._data.pushName)) || null;\n  message = p.body;\n} else {\n  phone = body.phone;\n  name = body.name || null;\n  message = body.message;\n  chatId = phone ? phone.replace(/^\\+/, '') + '@c.us' : null;\n}\n\nif (!phone || !message) return [{ json: { ignorado: true } }];\nreturn [{ json: { phone, name, message, chatId } }];"
+      },
+      "id": "b6f0c7e2-1d3a-4c55-9a21-0f5e2c7a1002",
+      "name": "Normalizar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.ignorado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b6f0c7e2-1d3a-4c55-9a21-0f5e2c7a1006",
+      "name": "Mensagem válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        570,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EDUBOT_BACKEND_URL }}/api/webhooks/whatsapp/inbound",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.EDUBOT_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, name: $json.name, message: $json.message }) }}",
+        "options": {}
+      },
+      "id": "b6f0c7e2-1d3a-4c55-9a21-0f5e2c7a1003",
+      "name": "Chatbot EduBot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        790,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.WAHA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: 'default', chatId: $('Normalizar mensagem').first().json.chatId, text: $json.reply }) }}",
+        "options": {}
+      },
+      "id": "b6f0c7e2-1d3a-4c55-9a21-0f5e2c7a1004",
+      "name": "Responder via WAHA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1010,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const reply = $('Chatbot EduBot').first().json.reply;\nconst waha = $input.first().json;\nreturn [{ json: { reply, enviadoPelaWaha: !waha.error, erroWaha: waha.error ? String(waha.error.message || waha.error) : null } }];"
+      },
+      "id": "b6f0c7e2-1d3a-4c55-9a21-0f5e2c7a1005",
+      "name": "Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1230,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{ json: { ignorado: true } }];"
+      },
+      "id": "b6f0c7e2-1d3a-4c55-9a21-0f5e2c7a1007",
+      "name": "Ignorar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook WAHA": {
+      "main": [
+        [
+          {
+            "node": "Normalizar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Mensagem válida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatbot EduBot": {
+      "main": [
+        [
+          {
+            "node": "Responder via WAHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responder via WAHA": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem válida?": {
+      "main": [
+        [
+          {
+            "node": "Chatbot EduBot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignorar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "pinData": {},
+  "tags": []
+}

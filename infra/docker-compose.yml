@@ -34,6 +34,9 @@ services:
       # igual ao N8N_WEBHOOK_SECRET do .env da raiz do backend.
       - EDUBOT_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET:-edubot-dev-secret}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # Chatbot (Sprint 04): URL do backend fora do Docker e chave da WAHA para responder.
+      - EDUBOT_BACKEND_URL=${EDUBOT_BACKEND_URL:-http://host.docker.internal:4000}
+      - WAHA_API_KEY=${WAHA_API_KEY:-changeme}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
