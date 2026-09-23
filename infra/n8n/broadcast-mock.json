@@ -1,0 +1,159 @@
+[
+  {
+    "updatedAt": "2026-09-18T22:23:50.804Z",
+    "createdAt": "2026-09-18T22:22:38.998Z",
+    "id": "sPCtekMhtu4pQ9IA",
+    "name": "EduBot - Broadcast (mock WAHA)",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "broadcast",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "id": "webhook-node",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ],
+        "webhookId": "broadcast-edubot"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const body = $input.first().json.body;\nconst contacts = body.contacts || [];\nreturn contacts.map((c) => ({\n  json: {\n    logId: c.logId,\n    phone: c.phone,\n    name: c.name,\n    message: body.message,\n    callbackUrl: (body.callbackUrl || '')\n      .replace('127.0.0.1', 'host.docker.internal')\n      .replace('localhost', 'host.docker.internal'),\n  },\n}));"
+        },
+        "id": "code-expand",
+        "name": "Montar lista de contatos",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          460,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const ok = Math.random() > 0.1;\nreturn {\n  json: {\n    ...$json,\n    status: ok ? 'enviado' : 'falha',\n    detail: ok\n      ? `Simulado: mensagem enviada para ${$json.phone} (mock WAHA)`\n      : 'Simulado: falha no envio (mock WAHA)',\n  },\n};"
+        },
+        "id": "code-simulate",
+        "name": "Simular envio (mock WAHA)",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          680,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{$json.callbackUrl}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-Webhook-Secret",
+                "value": "={{ $env.EDUBOT_WEBHOOK_SECRET }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ logId: $json.logId, status: $json.status, detail: $json.detail }) }}",
+          "options": {}
+        },
+        "id": "http-callback",
+        "name": "Callback status",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          900,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Montar lista de contatos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar lista de contatos": {
+        "main": [
+          [
+            {
+              "node": "Simular envio (mock WAHA)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Simular envio (mock WAHA)": {
+        "main": [
+          [
+            {
+              "node": "Callback status",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {},
+    "staticData": null,
+    "meta": null,
+    "nodeGroups": [],
+    "pinData": null,
+    "versionId": "915fb9bd-b694-449e-abc3-b6b804859d75",
+    "activeVersionId": "915fb9bd-b694-449e-abc3-b6b804859d75",
+    "versionCounter": 1,
+    "triggerCount": 1,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-09-18T22:22:39.055Z",
+        "createdAt": "2026-09-18T22:22:39.055Z",
+        "role": "workflow:owner",
+        "workflowId": "sPCtekMhtu4pQ9IA",
+        "projectId": "enbPMFiKFgm0pCkR",
+        "project": {
+          "updatedAt": "2026-09-18T22:21:22.093Z",
+          "createdAt": "2026-09-18T21:59:15.989Z",
+          "id": "enbPMFiKFgm0pCkR",
+          "name": "Edu Bot <admin@edubot.local>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "8da3931a-c8e4-4fb5-adbe-149a0a2c15fb"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

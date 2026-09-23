@@ -200,6 +200,62 @@ async function dispatch(req, res, next) {
   }
 }
 
+// RF-32 — reenvio restrito aos contatos cujo envio falhou. Reaproveita os
+// próprios registros de dispatch_logs (voltam para 'pendente'), então quem
+// já recebeu não é atingido de novo e nenhuma entrega é duplicada.
+async function resendFailures(req, res, next) {
+  try {
+    const { rows: oppRows } = await pool.query('SELECT * FROM opportunities WHERE id = $1', [req.params.id]);
+    const current = oppRows[0];
+    if (!current) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
+    if (!current.dispatched_at) return res.status(400).json({ error: 'Esta oportunidade ainda não foi disparada.' });
+
+    const { rows: failedRows } = await pool.query(
+      `UPDATE dispatch_logs dl SET status = 'pendente', detail = NULL, updated_at = now()
+       FROM contacts c
+       WHERE c.id = dl.contact_id AND dl.opportunity_id = $1 AND dl.status = 'falha'
+       RETURNING dl.id AS log_id, c.phone, c.name`,
+      [req.params.id]
+    );
+    if (failedRows.length === 0) {
+      return res.status(400).json({ error: 'Não há envios com falha para reenviar.' });
+    }
+
+    const opportunity = serialize(current);
+    const callbackUrl = `${req.protocol}://${req.get('host')}/api/webhooks/n8n/dispatch-status`;
+    const result = await triggerBroadcastWorkflow({
+      opportunity,
+      contacts: failedRows.map((r) => ({ logId: r.log_id, phone: r.phone, name: r.name })),
+      message: buildBroadcastMessage(opportunity),
+      callbackUrl,
+    });
+
+    if (!result.ok) {
+      await pool.query(
+        `UPDATE dispatch_logs SET status = 'falha', detail = $1, updated_at = now()
+         WHERE id = ANY($2::int[])`,
+        [result.error, failedRows.map((r) => r.log_id)]
+      );
+    }
+
+    await pool.query(
+      'INSERT INTO logs (type, user_id, opportunity_id, detail) VALUES ($1,$2,$3,$4)',
+      [
+        'disparo',
+        req.user.sub,
+        req.params.id,
+        result.ok
+          ? `Reenvio acionado no N8N para ${failedRows.length} contato(s) com falha.`
+          : `Reenvio acionado, mas o N8N não confirmou o recebimento: ${result.error}`,
+      ]
+    );
+
+    return res.json({ resent: failedRows.length, n8n: result });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 // RF-06 — consulta do log de envio (destinatário, oportunidade, data/hora e
 // status de entrega) de uma oportunidade já disparada.
 async function listDispatchLogs(req, res, next) {
@@ -232,4 +288,4 @@ async function listDispatchLogs(req, res, next) {
   }
 }
 
-module.exports = { create, list, getById, update, dispatch, listDispatchLogs };
+module.exports = { create, list, getById, update, dispatch, resendFailures, listDispatchLogs };

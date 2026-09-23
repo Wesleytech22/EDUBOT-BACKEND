@@ -1,5 +1,5 @@
 const express = require('express');
-const { create, list, getById, update, dispatch, listDispatchLogs } = require('../controllers/opportunities.controller');
+const { create, list, getById, update, dispatch, resendFailures, listDispatchLogs } = require('../controllers/opportunities.controller');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -16,5 +16,6 @@ router.get('/:id/dispatch-logs', listDispatchLogs);
 router.post('/', requireRole('administrador'), create);
 router.put('/:id', requireRole('administrador'), update);
 router.patch('/:id/dispatch', requireRole('administrador'), dispatch);
+router.post('/:id/dispatch/resend-failures', requireRole('administrador'), resendFailures);
 
 module.exports = router;

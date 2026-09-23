@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   postgres:
     image: postgres:16
@@ -32,6 +30,10 @@ services:
       - N8N_PROTOCOL=http
       - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
       - GENERIC_TIMEZONE=America/Sao_Paulo
+      # Secret do callback N8N -> backend (header X-Webhook-Secret); deve ser
+      # igual ao N8N_WEBHOOK_SECRET do .env da raiz do backend.
+      - EDUBOT_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET:-edubot-dev-secret}
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
