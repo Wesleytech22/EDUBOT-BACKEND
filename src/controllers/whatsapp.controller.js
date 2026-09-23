@@ -26,6 +26,14 @@ async function registerConsent(contactId, type) {
   );
 }
 
+// Registra cada mensagem recebida com a intenção identificada (Tela 06).
+async function logMessage(contactId, message, intent, opportunityId = null) {
+  await pool.query(
+    'INSERT INTO chatbot_messages (contact_id, message, intent, opportunity_id) VALUES ($1, $2, $3, $4)',
+    [contactId, message, intent, opportunityId]
+  );
+}
+
 async function getActiveOpportunities() {
   const { rows } = await pool.query('SELECT * FROM opportunities WHERE is_draft = false ORDER BY created_at DESC');
   return rows.map((row) => ({ ...row, status: classifyStatus(row) })).filter((o) => o.status === 'Ativa');
@@ -91,6 +99,7 @@ async function handleInboundMessage(req, res, next) {
     const command = matchCommand(message);
 
     if (command === 'OPT_IN') {
+      await logMessage(contact.id, message, 'opt_in');
       if (!contact.opt_in) {
         await pool.query('UPDATE contacts SET opt_in = true WHERE id = $1', [contact.id]);
         await registerConsent(contact.id, 'opt_in');
@@ -102,6 +111,7 @@ async function handleInboundMessage(req, res, next) {
     }
 
     if (command === 'OPT_OUT') {
+      await logMessage(contact.id, message, 'opt_out');
       if (contact.opt_in) {
         await pool.query('UPDATE contacts SET opt_in = false WHERE id = $1', [contact.id]);
       }
@@ -112,6 +122,7 @@ async function handleInboundMessage(req, res, next) {
     }
 
     if (!contact.opt_in) {
+      await logMessage(contact.id, message, 'sem_consentimento');
       return res.json({
         reply:
           'Olá! Para receber avisos de oportunidades educacionais, envie ENTRAR. Você pode cancelar quando quiser enviando SAIR.',
@@ -121,10 +132,12 @@ async function handleInboundMessage(req, res, next) {
     const activeOpportunities = await getActiveOpportunities();
 
     if (command === 'MENU') {
+      await logMessage(contact.id, message, 'menu');
       return res.json({ reply: buildMenuReply(activeOpportunities) });
     }
 
     if (command === 'HUMAN') {
+      await logMessage(contact.id, message, 'atendente');
       await pool.query(
         'INSERT INTO support_requests (contact_id, message) VALUES ($1, $2)',
         [contact.id, message]
@@ -136,11 +149,13 @@ async function handleInboundMessage(req, res, next) {
 
     const matched = await matchOpportunityByTitle(message, activeOpportunities);
     if (matched) {
+      await logMessage(contact.id, message, 'faq_oportunidade', matched.id);
       return res.json({ reply: buildOpportunityDetailReply(matched) });
     }
 
     // RF-09 — o fluxo automático não resolveu: encaminha para atendimento
     // humano e registra a solicitação.
+    await logMessage(contact.id, message, 'nao_resolvido');
     await pool.query(
       'INSERT INTO support_requests (contact_id, message) VALUES ($1, $2)',
       [contact.id, message]
@@ -179,4 +194,22 @@ async function listSupportRequests(req, res, next) {
   }
 }
 
-module.exports = { handleInboundMessage, listSupportRequests };
+// RF-09 — a equipe marca a solicitação como atendida (ou reabre).
+async function updateSupportRequest(req, res, next) {
+  try {
+    const { status } = req.body;
+    if (!['pendente', 'atendido'].includes(status)) {
+      return res.status(400).json({ error: 'Status deve ser "pendente" ou "atendido".' });
+    }
+    const { rows } = await pool.query(
+      'UPDATE support_requests SET status = $1 WHERE id = $2 RETURNING id, status',
+      [status, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    return res.json(rows[0]);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = { handleInboundMessage, listSupportRequests, updateSupportRequest };

@@ -52,6 +52,9 @@ Contas criadas pelo seed (definidas em `.env`):
 | POST | `/api/webhooks/n8n/dispatch-status` | Callback do N8N com o status de entrega (RF-06) | Segredo compartilhado (`X-Webhook-Secret`) |
 | POST | `/api/webhooks/whatsapp/inbound` | Mensagem recebida no WhatsApp (RF-07 a RF-11) | Segredo compartilhado (`X-Webhook-Secret`) |
 | GET | `/api/support-requests` | Fila de solicitações encaminhadas a atendente humano (RF-09) | Sim |
+| PATCH | `/api/support-requests/:id` | Marca a solicitação como `atendido` ou `pendente` (RF-09) | Sim |
+| POST | `/api/opportunities/:id/dispatch/resend-failures` | Reenvia só para os contatos com falha (RF-32) — só Administrador | Sim |
+| GET | `/api/metrics/overview` | Métricas de envio e do chatbot (respostas, dúvidas, engajamento) por período/oportunidade (RF-37 a RF-39) | Sim |
 
 `status` retornado por oportunidade: `Rascunho`, `Ativa` ou `Encerrada`,
 calculado automaticamente a partir de `deadline` (RF-03).
@@ -165,6 +168,7 @@ src/
       001_init.sql             # users, opportunities, logs
       005_broadcast.sql        # contacts, dispatch_logs (RF-04 a RF-06)
       006_chatbot_consentimento.sql  # consent_logs, support_requests (RF-07 a RF-11)
+      007_chatbot_messages.sql       # mensagens recebidas + intenção (métricas da Tela 06)
   middleware/
     auth.js                    # requireAuth / requireRole (RF-20, RF-21)
     webhookAuth.js              # requireWebhookSecret (RNF-08)

@@ -1,4 +1,4 @@
-# Infra — Sprints 02 e 03
+# Infra — Sprints 02 a 04
 
 Ambiente de teste para as dependências externas do EduBot (RF-01 a RF-03,
 dependências da seção 5.9 do Documento de Escopo): PostgreSQL, N8N e WAHA.
@@ -44,6 +44,31 @@ Se o Docker Desktop estiver desligado, o disparo não é desfeito, mas todos os
 logs ficam como "falha" com o motivo "Falha ao contatar o N8N". Depois de
 subir o ambiente, use "Reenviar para quem falhou" na tela de Resultado do
 Disparo (RF-32).
+
+## Workflow do chatbot (Sprint 04)
+
+`n8n/chatbot-inbound.json` recebe os eventos da WAHA em `POST /webhook/waha`
+(`WAHA_HOOK_URL`), ignora mensagens do próprio número e de grupos, chama o
+backend em `POST /api/webhooks/whatsapp/inbound` (opt-in/opt-out, MENU, FAQ,
+atendente — RF-07 a RF-11) e responde ao contato pela WAHA (`/api/sendText`).
+Importe e ative como o de broadcast:
+
+```bash
+docker compose cp n8n/chatbot-inbound.json n8n:/tmp/in.json
+docker compose exec n8n n8n import:workflow --input=/tmp/in.json
+docker compose exec n8n n8n update:workflow --id=EduBotInboundWA1 --active=true
+docker compose restart n8n
+```
+
+Para testar sem WhatsApp pareado, envie um payload simples — o webhook
+devolve a resposta do chatbot (`reply`) e se a WAHA conseguiu entregar:
+
+```bash
+curl -X POST http://localhost:5678/webhook/waha -H "Content-Type: application/json"   -d '{"phone":"+5511999990001","message":"MENU"}'
+```
+
+Enquanto a sessão da WAHA não estiver `WORKING`, `enviadoPelaWaha` volta
+`false` (a resposta é gerada e registrada normalmente, só não chega ao celular).
 
 ## Notas
 
