@@ -101,6 +101,14 @@ async function update(req, res, next) {
     if (!existingRows[0]) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
 
     const current = existingRows[0];
+
+    // Uma oportunidade já disparada não pode voltar a ser rascunho: sumiria
+    // do MENU do chatbot e não haveria como publicá-la de novo (o disparo
+    // não se repete).
+    if (current.dispatched_at && req.body.isDraft === true) {
+      return res.status(400).json({ error: 'Uma oportunidade já disparada não pode voltar a ser rascunho.' });
+    }
+
     const {
       title = current.title,
       description = current.description,
@@ -137,6 +145,9 @@ async function dispatch(req, res, next) {
     const current = existingRows[0];
     if (!current) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
     if (current.is_draft) return res.status(400).json({ error: 'Não é possível disparar um rascunho.' });
+    if (classifyStatus(current) === 'Encerrada') {
+      return res.status(400).json({ error: 'Não é possível disparar uma oportunidade encerrada.' });
+    }
     if (current.dispatched_at) return res.status(400).json({ error: 'O disparo não pode ser cancelado nem repetido depois de iniciado.' });
 
     const { rows: contacts } = await pool.query('SELECT * FROM contacts WHERE opt_in = true');
