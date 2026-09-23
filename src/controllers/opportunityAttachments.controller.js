@@ -101,4 +101,16 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { upload, download, remove, hasAttachment, ensureAttachmentsTable };
+// Anexo no formato enviado ao workflow de broadcast do N8N, que o repassa ao
+// aluno junto com a mensagem (Telegram: sendDocument / sendPhoto).
+async function getAttachmentForBroadcast(opportunityId) {
+  await ensureAttachmentsTable();
+  const { rows } = await pool.query(
+    'SELECT file_name, mime_type, data FROM opportunity_attachments WHERE opportunity_id = $1',
+    [opportunityId]
+  );
+  if (!rows[0]) return null;
+  return { fileName: rows[0].file_name, mimeType: rows[0].mime_type, base64: rows[0].data.toString('base64') };
+}
+
+module.exports = { upload, download, remove, hasAttachment, ensureAttachmentsTable, getAttachmentForBroadcast };
