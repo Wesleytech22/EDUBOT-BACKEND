@@ -13,8 +13,9 @@ function buildFilters({ opportunityId, from, to }) {
     conditions.push(`dl.created_at >= $${params.length}`);
   }
   if (to) {
+    // 'to' é uma data (AAAA-MM-DD) inclusiva: considera o dia inteiro.
     params.push(to);
-    conditions.push(`dl.created_at <= $${params.length}`);
+    conditions.push(`dl.created_at < ($${params.length}::date + INTERVAL '1 day')`);
   }
 
   return { conditions, params };
