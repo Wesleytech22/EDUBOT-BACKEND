@@ -167,6 +167,7 @@ async function dispatch(req, res, next) {
         logId: logIdByContactId.get(c.id),
         phone: c.phone,
         name: c.name,
+        telegramChatId: c.telegram_chat_id,
       })),
       message: buildBroadcastMessage(opportunity),
       callbackUrl,
@@ -214,7 +215,7 @@ async function resendFailures(req, res, next) {
       `UPDATE dispatch_logs dl SET status = 'pendente', detail = NULL, updated_at = now()
        FROM contacts c
        WHERE c.id = dl.contact_id AND dl.opportunity_id = $1 AND dl.status = 'falha'
-       RETURNING dl.id AS log_id, c.phone, c.name`,
+       RETURNING dl.id AS log_id, c.phone, c.name, c.telegram_chat_id`,
       [req.params.id]
     );
     if (failedRows.length === 0) {
@@ -225,7 +226,12 @@ async function resendFailures(req, res, next) {
     const callbackUrl = `${req.protocol}://${req.get('host')}/api/webhooks/n8n/dispatch-status`;
     const result = await triggerBroadcastWorkflow({
       opportunity,
-      contacts: failedRows.map((r) => ({ logId: r.log_id, phone: r.phone, name: r.name })),
+      contacts: failedRows.map((r) => ({
+        logId: r.log_id,
+        phone: r.phone,
+        name: r.name,
+        telegramChatId: r.telegram_chat_id,
+      })),
       message: buildBroadcastMessage(opportunity),
       callbackUrl,
     });

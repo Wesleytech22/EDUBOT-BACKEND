@@ -37,6 +37,9 @@ services:
       # Chatbot (Sprint 04): URL do backend fora do Docker e chave da WAHA para responder.
       - EDUBOT_BACKEND_URL=${EDUBOT_BACKEND_URL:-http://host.docker.internal:4000}
       - WAHA_API_KEY=${WAHA_API_KEY:-changeme}
+      # Canal Telegram: token do bot (mesmo do .env da raiz) para o broadcast.
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_API_URL=${TELEGRAM_API_URL:-https://api.telegram.org}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

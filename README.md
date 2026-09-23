@@ -169,6 +169,7 @@ src/
       005_broadcast.sql        # contacts, dispatch_logs (RF-04 a RF-06)
       006_chatbot_consentimento.sql  # consent_logs, support_requests (RF-07 a RF-11)
       007_chatbot_messages.sql       # mensagens recebidas + intenção (métricas da Tela 06)
+      008_telegram.sql               # contacts.telegram_chat_id (canal Telegram)
   middleware/
     auth.js                    # requireAuth / requireRole (RF-20, RF-21)
     webhookAuth.js              # requireWebhookSecret (RNF-08)
@@ -182,6 +183,8 @@ src/
     auth.routes.js
     opportunities.routes.js
     webhooks.routes.js
+  telegram/
+    bot.js                       # canal Telegram: long polling + vínculo do número (ver infra/README.md)
     support.routes.js            # fila de atendimento humano (RF-09)
   utils/
     jwt.js

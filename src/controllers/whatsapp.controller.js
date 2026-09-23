@@ -84,86 +84,92 @@ async function matchOpportunityByTitle(message, activeOpportunities) {
   return activeOpportunities.find((o) => o.title.toLowerCase().includes(term)) || null;
 }
 
-// RF-07 a RF-11 — webhook chamado pelo workflow do N8N a cada mensagem
-// recebida via WAHA. Aplica o fluxo conversacional (opt-in/opt-out, menu,
-// FAQ e encaminhamento humano) e devolve o texto que o N8N deve reenviar
-// ao contato pelo WAHA.
+// RF-07 a RF-11 — fluxo conversacional (opt-in/opt-out, menu, FAQ e
+// encaminhamento humano), independente do canal: recebe a mensagem de um
+// contato (identificado pelo telefone) e devolve { reply } com o texto a
+// enviar de volta. Usado pelo webhook do N8N/WAHA e pelo bot do Telegram.
+async function processInboundMessage({ phone, name, message }) {
+  const contact = await findOrCreateContact(phone, name);
+  const command = matchCommand(message);
+
+  if (command === 'OPT_IN') {
+    await logMessage(contact.id, message, 'opt_in');
+    if (!contact.opt_in) {
+      await pool.query('UPDATE contacts SET opt_in = true WHERE id = $1', [contact.id]);
+      await registerConsent(contact.id, 'opt_in');
+    }
+    return {
+      reply:
+        'Você está inscrito para receber novidades de oportunidades educacionais. Envie MENU a qualquer momento para ver as ativas, ou SAIR para cancelar.',
+    };
+  }
+
+  if (command === 'OPT_OUT') {
+    await logMessage(contact.id, message, 'opt_out');
+    if (contact.opt_in) {
+      await pool.query('UPDATE contacts SET opt_in = false WHERE id = $1', [contact.id]);
+    }
+    await registerConsent(contact.id, 'opt_out');
+    return {
+      reply: 'Você não receberá mais notificações. Envie ENTRAR a qualquer momento para voltar a receber.',
+    };
+  }
+
+  if (!contact.opt_in) {
+    await logMessage(contact.id, message, 'sem_consentimento');
+    return {
+      reply:
+        'Olá! Para receber avisos de oportunidades educacionais, envie ENTRAR. Você pode cancelar quando quiser enviando SAIR.',
+    };
+  }
+
+  const activeOpportunities = await getActiveOpportunities();
+
+  if (command === 'MENU') {
+    await logMessage(contact.id, message, 'menu');
+    return { reply: buildMenuReply(activeOpportunities) };
+  }
+
+  if (command === 'HUMAN') {
+    await logMessage(contact.id, message, 'atendente');
+    await pool.query(
+      'INSERT INTO support_requests (contact_id, message) VALUES ($1, $2)',
+      [contact.id, message]
+    );
+    return {
+      reply: 'Encaminhamos sua solicitação para a coordenação da escola. Em breve alguém vai te responder por aqui.',
+    };
+  }
+
+  const matched = await matchOpportunityByTitle(message, activeOpportunities);
+  if (matched) {
+    await logMessage(contact.id, message, 'faq_oportunidade', matched.id);
+    return { reply: buildOpportunityDetailReply(matched) };
+  }
+
+  // RF-09 — o fluxo automático não resolveu: encaminha para atendimento
+  // humano e registra a solicitação.
+  await logMessage(contact.id, message, 'nao_resolvido');
+  await pool.query(
+    'INSERT INTO support_requests (contact_id, message) VALUES ($1, $2)',
+    [contact.id, message]
+  );
+  return {
+    reply:
+      'Não encontrei essa informação automaticamente. Encaminhei sua dúvida para a coordenação da escola — em breve alguém responde por aqui. Envie MENU para ver as oportunidades ativas.',
+  };
+}
+
+
+// Webhook chamado pelo workflow do N8N a cada mensagem recebida via WAHA;
+// devolve o texto que o N8N deve reenviar ao contato.
 async function handleInboundMessage(req, res, next) {
   try {
     const { phone, name, message } = req.body;
     if (!phone || !message) {
       return res.status(400).json({ error: 'Informe phone e message.' });
     }
-
-    const contact = await findOrCreateContact(phone, name);
-    const command = matchCommand(message);
-
-    if (command === 'OPT_IN') {
-      await logMessage(contact.id, message, 'opt_in');
-      if (!contact.opt_in) {
-        await pool.query('UPDATE contacts SET opt_in = true WHERE id = $1', [contact.id]);
-        await registerConsent(contact.id, 'opt_in');
-      }
-      return res.json({
-        reply:
-          'Você está inscrito para receber novidades de oportunidades educacionais. Envie MENU a qualquer momento para ver as ativas, ou SAIR para cancelar.',
-      });
-    }
-
-    if (command === 'OPT_OUT') {
-      await logMessage(contact.id, message, 'opt_out');
-      if (contact.opt_in) {
-        await pool.query('UPDATE contacts SET opt_in = false WHERE id = $1', [contact.id]);
-      }
-      await registerConsent(contact.id, 'opt_out');
-      return res.json({
-        reply: 'Você não receberá mais notificações. Envie ENTRAR a qualquer momento para voltar a receber.',
-      });
-    }
-
-    if (!contact.opt_in) {
-      await logMessage(contact.id, message, 'sem_consentimento');
-      return res.json({
-        reply:
-          'Olá! Para receber avisos de oportunidades educacionais, envie ENTRAR. Você pode cancelar quando quiser enviando SAIR.',
-      });
-    }
-
-    const activeOpportunities = await getActiveOpportunities();
-
-    if (command === 'MENU') {
-      await logMessage(contact.id, message, 'menu');
-      return res.json({ reply: buildMenuReply(activeOpportunities) });
-    }
-
-    if (command === 'HUMAN') {
-      await logMessage(contact.id, message, 'atendente');
-      await pool.query(
-        'INSERT INTO support_requests (contact_id, message) VALUES ($1, $2)',
-        [contact.id, message]
-      );
-      return res.json({
-        reply: 'Encaminhamos sua solicitação para a coordenação da escola. Em breve alguém vai te responder por aqui.',
-      });
-    }
-
-    const matched = await matchOpportunityByTitle(message, activeOpportunities);
-    if (matched) {
-      await logMessage(contact.id, message, 'faq_oportunidade', matched.id);
-      return res.json({ reply: buildOpportunityDetailReply(matched) });
-    }
-
-    // RF-09 — o fluxo automático não resolveu: encaminha para atendimento
-    // humano e registra a solicitação.
-    await logMessage(contact.id, message, 'nao_resolvido');
-    await pool.query(
-      'INSERT INTO support_requests (contact_id, message) VALUES ($1, $2)',
-      [contact.id, message]
-    );
-    return res.json({
-      reply:
-        'Não encontrei essa informação automaticamente. Encaminhei sua dúvida para a coordenação da escola — em breve alguém responde por aqui. Envie MENU para ver as oportunidades ativas.',
-    });
+    return res.json(await processInboundMessage({ phone, name, message }));
   } catch (err) {
     return next(err);
   }
@@ -212,4 +218,4 @@ async function updateSupportRequest(req, res, next) {
   }
 }
 
-module.exports = { handleInboundMessage, listSupportRequests, updateSupportRequest };
+module.exports = { processInboundMessage, handleInboundMessage, listSupportRequests, updateSupportRequest };

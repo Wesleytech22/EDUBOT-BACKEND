@@ -1,0 +1,97 @@
+{
+  "id": "EduBotBcastTgm01",
+  "name": "EduBot - Broadcast (Telegram)",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "broadcast-telegram",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "a1c2e3f4-0000-4000-8000-00000000b001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "a1c2e3f4-0000-4000-8000-00000000c001"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Entrega a mensagem do broadcast pelo Telegram (Bot API oficial). Contatos\n// que ainda não vincularam o chat (não abriram o bot e compartilharam o\n// número) saem direto como falha, com o motivo registrado (RF-06).\nconst body = $('Webhook').first().json.body;\nconst base = $env.TELEGRAM_API_URL || 'https://api.telegram.org';\nconst token = $env.TELEGRAM_BOT_TOKEN;\nconst callbackUrl = (body.callbackUrl || '')\n  .replace('127.0.0.1', 'host.docker.internal')\n  .replace('localhost', 'host.docker.internal');\n\nconst results = [];\nfor (const c of body.contacts || []) {\n  let status = 'falha';\n  let detail;\n  if (!token) {\n    detail = 'TELEGRAM_BOT_TOKEN não configurado no N8N.';\n  } else if (!c.telegramChatId) {\n    detail = 'Contato ainda não vinculou o Telegram (abrir o bot e compartilhar o número).';\n  } else {\n    try {\n      const res = await this.helpers.httpRequest({\n        method: 'POST',\n        url: `${base}/bot${token}/sendMessage`,\n        body: { chat_id: c.telegramChatId, text: body.message },\n        json: true,\n      });\n      status = res.ok ? 'enviado' : 'falha';\n      detail = res.ok ? `Entregue no Telegram (mensagem ${res.result.message_id}).` : res.description;\n    } catch (err) {\n      detail = `Telegram recusou o envio: ${err.description || err.message}`;\n    }\n  }\n  results.push({ json: { logId: c.logId, status, detail, callbackUrl } });\n}\nreturn results;"
+      },
+      "id": "a1c2e3f4-0000-4000-8000-00000000b002",
+      "name": "Enviar pelo Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.callbackUrl}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.EDUBOT_WEBHOOK_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ logId: $json.logId, status: $json.status, detail: $json.detail }) }}",
+        "options": {}
+      },
+      "id": "a1c2e3f4-0000-4000-8000-00000000b003",
+      "name": "Callback status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Enviar pelo Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar pelo Telegram": {
+      "main": [
+        [
+          {
+            "node": "Callback status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "pinData": {},
+  "tags": []
+}

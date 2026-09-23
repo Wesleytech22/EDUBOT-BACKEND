@@ -70,6 +70,43 @@ curl -X POST http://localhost:5678/webhook/waha -H "Content-Type: application/js
 Enquanto a sessão da WAHA não estiver `WORKING`, `enviadoPelaWaha` volta
 `false` (a resposta é gerada e registrada normalmente, só não chega ao celular).
 
+## Canal Telegram (branch `feat/sprint04-canal-telegram`)
+
+Alternativa ao WhatsApp enquanto o pareamento da WAHA estiver bloqueado.
+Usa a Bot API oficial do Telegram — gratuita, sem risco de bloqueio.
+
+1. No Telegram, fale com o **@BotFather**, envie `/newbot` e copie o token.
+2. Coloque o token em `TELEGRAM_BOT_TOKEN` no `.env` da raiz **e** no
+   `infra/.env`, e troque na raiz
+   `N8N_WEBHOOK_URL=http://localhost:5678/webhook/broadcast-telegram`.
+3. Recrie o N8N (`docker compose up -d n8n`) e importe o workflow:
+
+```bash
+docker compose cp n8n/broadcast-telegram.json n8n:/tmp/tg.json
+docker compose exec n8n n8n import:workflow --input=/tmp/tg.json
+docker compose exec n8n n8n update:workflow --id=EduBotBcastTgm01 --active=true
+docker compose restart n8n
+```
+
+4. Reinicie o backend: o log mostra `Canal Telegram ativo (long polling)`.
+
+Como funciona:
+
+- **Mensagens recebidas:** o backend busca as mensagens no Telegram
+  (`getUpdates`, long polling) — não precisa de URL pública nem túnel HTTPS.
+  O fluxo do chatbot é o mesmo do WhatsApp (ENTRAR, MENU, FAQ, ATENDENTE,
+  SAIR), com esses comandos num teclado fixo e também como `/menu`, `/sair`…
+- **Vínculo do contato:** na primeira conversa o bot pede "Compartilhar meu
+  número" e grava o `telegram_chat_id` no contato daquele telefone (só aceita
+  o número da própria pessoa). Opt-in, métricas e atendimento continuam
+  iguais; o opt-in segue explícito (ENTRAR).
+- **Broadcast:** o workflow `broadcast-telegram` envia pelo `sendMessage` e
+  devolve o status pelo mesmo callback. Contato sem Telegram vinculado fica
+  como falha, com o motivo, e pode receber pelo "Reenviar" depois de vincular.
+
+Limitação de produto: a família precisa ter o Telegram instalado — o escopo
+original (EX-03) prevê o canal que a família já usa (WhatsApp).
+
 ## Notas
 
 - Os dados de cada serviço persistem em volumes nomeados (`postgres_data`,
