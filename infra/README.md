@@ -103,6 +103,12 @@ Como funciona:
 - **Broadcast:** o workflow `broadcast-telegram` envia pelo `sendMessage` e
   devolve o status pelo mesmo callback. Contato sem Telegram vinculado fica
   como falha, com o motivo, e pode receber pelo "Reenviar" depois de vincular.
+- **Anexo:** se a oportunidade tem anexo, o backend o manda no payload e o
+  workflow envia o arquivo logo depois da mensagem (PDF por `sendDocument`,
+  imagem por `sendPhoto`). O upload acontece uma vez só; os demais contatos
+  recebem pelo `file_id`. Se o anexo falhar, a mensagem continua entregue e o
+  motivo aparece no Resultado do Disparo. Depois de alterar o workflow,
+  reimporte-o e reinicie o N8N (`docker compose restart n8n`).
 
 Limitação de produto: a família precisa ter o Telegram instalado — o escopo
 original (EX-03) prevê o canal que a família já usa (WhatsApp).

@@ -15,7 +15,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        240,
+        220,
         300
       ],
       "webhookId": "a1c2e3f4-0000-4000-8000-00000000c001"
@@ -23,16 +23,95 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Entrega a mensagem do broadcast pelo Telegram (Bot API oficial). Contatos\n// que ainda não vincularam o chat (não abriram o bot e compartilharam o\n// número) saem direto como falha, com o motivo registrado (RF-06).\nconst body = $('Webhook').first().json.body;\nconst base = $env.TELEGRAM_API_URL || 'https://api.telegram.org';\nconst token = $env.TELEGRAM_BOT_TOKEN;\nconst callbackUrl = (body.callbackUrl || '')\n  .replace('127.0.0.1', 'host.docker.internal')\n  .replace('localhost', 'host.docker.internal');\n\n// O token só existe no ambiente do N8N; nunca pode ir para o detalhe do log.\nconst redact = (text) => (token ? String(text ?? '').split(token).join('***') : String(text ?? ''));\n\nconst results = [];\nfor (const c of body.contacts || []) {\n  let status = 'falha';\n  let detail;\n  if (!token) {\n    detail = 'TELEGRAM_BOT_TOKEN não configurado no N8N.';\n  } else if (!c.telegramChatId) {\n    detail = 'Contato ainda não vinculou o Telegram (abrir o bot e compartilhar o número).';\n  } else {\n    try {\n      const res = await this.helpers.httpRequest({\n        method: 'POST',\n        url: `${base}/bot${token}/sendMessage`,\n        body: { chat_id: c.telegramChatId, text: body.message },\n        json: true,\n      });\n      status = res.ok ? 'enviado' : 'falha';\n      detail = res.ok ? `Entregue no Telegram (mensagem ${res.result.message_id}).` : res.description;\n    } catch (err) {\n      detail = `Telegram recusou o envio: ${err.description || err.message}`;\n    }\n  }\n  results.push({ json: { logId: c.logId, status, detail: redact(detail), callbackUrl } });\n}\nreturn results;"
+        "jsCode": "// Entrega a mensagem do broadcast pelo Telegram (Bot API oficial). Contatos\n// que ainda não vincularam o chat (não abriram o bot e compartilharam o\n// número) saem direto como falha, com o motivo registrado (RF-06).\n// O anexo, se houver, é enviado nos próximos nós.\nconst body = $('Webhook').first().json.body;\nconst base = $env.TELEGRAM_API_URL || 'https://api.telegram.org';\nconst token = $env.TELEGRAM_BOT_TOKEN;\nconst callbackUrl = (body.callbackUrl || '')\n  .replace('127.0.0.1', 'host.docker.internal')\n  .replace('localhost', 'host.docker.internal');\n\n// O token só existe no ambiente do N8N; nunca pode ir para o detalhe do log.\nconst redact = (text) => (token ? String(text ?? '').split(token).join('***') : String(text ?? ''));\n\nconst results = [];\nfor (const c of body.contacts || []) {\n  let status = 'falha';\n  let detail;\n  let messageId = null;\n  if (!token) {\n    detail = 'TELEGRAM_BOT_TOKEN não configurado no N8N.';\n  } else if (!c.telegramChatId) {\n    detail = 'Contato ainda não vinculou o Telegram (abrir o bot e compartilhar o número).';\n  } else {\n    try {\n      const res = await this.helpers.httpRequest({\n        method: 'POST',\n        url: `${base}/bot${token}/sendMessage`,\n        body: { chat_id: c.telegramChatId, text: body.message },\n        json: true,\n      });\n      status = res.ok ? 'enviado' : 'falha';\n      messageId = res.ok ? res.result.message_id : null;\n      detail = res.ok ? `Entregue no Telegram (mensagem ${messageId}).` : res.description;\n    } catch (err) {\n      detail = `Telegram recusou o envio: ${err.description || err.message}`;\n    }\n  }\n  results.push({ json: { logId: c.logId, status, detail: redact(detail), callbackUrl, chatId: c.telegramChatId || null, messageId } });\n}\nreturn results;"
       },
       "id": "a1c2e3f4-0000-4000-8000-00000000b002",
       "name": "Enviar pelo Telegram",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        460,
+        440,
         300
       ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Anexo da oportunidade (PDF ou imagem) vira dado binário para o nó de\n// upload. O arquivo sobe uma vez só, no primeiro contato que recebeu o texto;\n// os demais recebem pelo file_id devolvido pelo Telegram.\nconst attachment = $('Webhook').first().json.body.attachment;\nconst first = $input.all().find((i) => i.json.status === 'enviado');\nif (!attachment || !attachment.base64 || !first) return [{ json: { skip: true } }];\n\nconst isPhoto = String(attachment.mimeType).startsWith('image/');\nreturn [{\n  json: { skip: false, isPhoto, logId: first.json.logId, chatId: first.json.chatId, method: isPhoto ? 'sendPhoto' : 'sendDocument', field: isPhoto ? 'photo' : 'document' },\n  binary: { data: { data: attachment.base64, mimeType: attachment.mimeType, fileName: attachment.fileName || 'anexo' } },\n}];"
+      },
+      "name": "Preparar anexo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ],
+      "id": "b7a1c2e3-0000-4000-8000-00000000c010"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skip }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "name": "Tem anexo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        880,
+        300
+      ],
+      "id": "b7a1c2e3-0000-4000-8000-00000000c011"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.TELEGRAM_API_URL || 'https://api.telegram.org') + '/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.method }}",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "={{ $json.field }}",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Upload do anexo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        200
+      ],
+      "onError": "continueRegularOutput",
+      "id": "b7a1c2e3-0000-4000-8000-00000000c012"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Junta o resultado do anexo ao status de cada contato: o primeiro recebeu\n// o upload; os demais recebem pelo file_id. Se o anexo falhar, a mensagem\n// continua entregue e o motivo vai para o detalhe do log.\nconst base = $env.TELEGRAM_API_URL || 'https://api.telegram.org';\nconst token = $env.TELEGRAM_BOT_TOKEN;\nconst redact = (text) => (token ? String(text ?? '').split(token).join('***') : String(text ?? ''));\n\nconst items = $('Enviar pelo Telegram').all().map((i) => ({ ...i.json }));\nconst prep = $('Preparar anexo').first().json;\nconst done = (list) => list.map(({ chatId, messageId, ...j }) => ({ json: j }));\nif (prep.skip) return done(items);\n\nconst up = $input.first().json;\nlet fileId = null;\nlet uploadMessageId = null;\nlet uploadError = null;\nif (up && up.ok && up.result) {\n  uploadMessageId = up.result.message_id;\n  fileId = prep.isPhoto ? up.result.photo[up.result.photo.length - 1].file_id : up.result.document.file_id;\n} else {\n  uploadError = redact((up && up.error && (up.error.message || up.error.description)) || (up && up.description) || 'falha no upload');\n}\n\nfor (const j of items) {\n  if (j.status !== 'enviado') continue;\n  if (j.logId === prep.logId) {\n    j.detail = uploadMessageId\n      ? `Entregue no Telegram com o anexo (mensagens ${j.messageId} e ${uploadMessageId}).`\n      : `Mensagem entregue (${j.messageId}), mas o anexo não foi enviado: ${uploadError}`;\n    continue;\n  }\n  if (!fileId) {\n    j.detail = `Mensagem entregue (${j.messageId}), mas o anexo não foi enviado: ${uploadError}`;\n    continue;\n  }\n  try {\n    const res = await this.helpers.httpRequest({\n      method: 'POST',\n      url: `${base}/bot${token}/${prep.method}`,\n      body: { chat_id: j.chatId, [prep.field]: fileId },\n      json: true,\n    });\n    j.detail = res.ok\n      ? `Entregue no Telegram com o anexo (mensagens ${j.messageId} e ${res.result.message_id}).`\n      : `Mensagem entregue (${j.messageId}), mas o anexo não foi enviado: ${res.description}`;\n  } catch (err) {\n    j.detail = redact(`Mensagem entregue (${j.messageId}), mas o anexo não foi enviado: ${err.description || err.message}`);\n  }\n}\nreturn done(items);"
+      },
+      "name": "Enviar anexo aos demais",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "id": "b7a1c2e3-0000-4000-8000-00000000c013"
     },
     {
       "parameters": {
@@ -61,7 +140,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        680,
+        1540,
         300
       ]
     }
@@ -79,6 +158,57 @@
       ]
     },
     "Enviar pelo Telegram": {
+      "main": [
+        [
+          {
+            "node": "Preparar anexo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar anexo": {
+      "main": [
+        [
+          {
+            "node": "Tem anexo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem anexo?": {
+      "main": [
+        [
+          {
+            "node": "Upload do anexo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar anexo aos demais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload do anexo": {
+      "main": [
+        [
+          {
+            "node": "Enviar anexo aos demais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar anexo aos demais": {
       "main": [
         [
           {

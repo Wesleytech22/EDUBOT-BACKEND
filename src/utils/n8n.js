@@ -2,9 +2,9 @@
 // broadcast. A chamada é resiliente: se o N8N estiver indisponível (R-02),
 // o disparo no banco não é desfeito — apenas os logs ficam marcados como
 // falha, e o disparo pode ser diagnosticado pelos logs (RF-06).
-const N8N_TIMEOUT_MS = 5000;
+const N8N_TIMEOUT_MS = 15000; // payload pode levar o anexo (até 5 MB) em base64
 
-async function triggerBroadcastWorkflow({ opportunity, contacts, message, callbackUrl }) {
+async function triggerBroadcastWorkflow({ opportunity, contacts, message, callbackUrl, attachment = null }) {
   const webhookUrl = process.env.N8N_WEBHOOK_URL;
 
   if (!webhookUrl) {
@@ -18,7 +18,9 @@ async function triggerBroadcastWorkflow({ opportunity, contacts, message, callba
     const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ opportunity, contacts, message, callbackUrl }),
+      // attachment: { fileName, mimeType, base64 } ou null — o workflow do
+      // Telegram envia o arquivo depois da mensagem.
+      body: JSON.stringify({ opportunity, contacts, message, callbackUrl, attachment }),
       signal: controller.signal,
     });
 

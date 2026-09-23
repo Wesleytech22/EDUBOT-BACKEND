@@ -1,7 +1,7 @@
 const pool = require('../db/pool');
 const { classifyStatus } = require('../utils/classifyStatus');
 const { triggerBroadcastWorkflow, buildBroadcastMessage } = require('../utils/n8n');
-const { hasAttachment } = require('./opportunityAttachments.controller');
+const { hasAttachment, getAttachmentForBroadcast } = require('./opportunityAttachments.controller');
 
 function serialize(row) {
   return {
@@ -187,6 +187,7 @@ async function dispatch(req, res, next) {
       })),
       message: buildBroadcastMessage(opportunity),
       callbackUrl,
+      attachment: await getAttachmentForBroadcast(current.id),
     });
 
     // Sem N8N acessível (dev/CI), os logs seguem marcados de imediato — em
@@ -250,6 +251,7 @@ async function resendFailures(req, res, next) {
       })),
       message: buildBroadcastMessage(opportunity),
       callbackUrl,
+      attachment: await getAttachmentForBroadcast(current.id),
     });
 
     if (!result.ok) {
