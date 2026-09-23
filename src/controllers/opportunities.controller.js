@@ -1,6 +1,7 @@
 const pool = require('../db/pool');
 const { classifyStatus } = require('../utils/classifyStatus');
 const { triggerBroadcastWorkflow, buildBroadcastMessage } = require('../utils/n8n');
+const { hasAttachment } = require('./opportunityAttachments.controller');
 
 function serialize(row) {
   return {

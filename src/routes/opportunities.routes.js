@@ -1,5 +1,7 @@
 const express = require('express');
+const multer = require('multer');
 const { create, list, getById, update, dispatch, resendFailures, listDispatchLogs } = require('../controllers/opportunities.controller');
+const attachments = require('../controllers/opportunityAttachments.controller');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 // Anexo da oportunidade (RF-01): PDF, PNG ou JPG de até 5 MB.
@@ -31,6 +33,7 @@ router.use(requireAuth, requireRole('administrador', 'equipe_escola'));
 router.get('/', list);
 router.get('/:id', getById);
 router.get('/:id/dispatch-logs', listDispatchLogs);
+router.get('/:id/attachment', attachments.download);
 
 // Cadastro/edição/disparo: restrito ao Administrador (RF-20 — Equipe da
 // Escola não acessa ações de gestão, apenas consulta).
@@ -38,5 +41,7 @@ router.post('/', requireRole('administrador'), create);
 router.put('/:id', requireRole('administrador'), update);
 router.patch('/:id/dispatch', requireRole('administrador'), dispatch);
 router.post('/:id/dispatch/resend-failures', requireRole('administrador'), resendFailures);
+router.put('/:id/attachment', requireRole('administrador'), uploadAttachment, attachments.upload);
+router.delete('/:id/attachment', requireRole('administrador'), attachments.remove);
 
 module.exports = router;
