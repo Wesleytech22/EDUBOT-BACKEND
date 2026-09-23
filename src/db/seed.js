@@ -109,8 +109,12 @@ async function seed() {
   // Cauê Soares Valente saiu do time — remove o card da tela "Sobre Nós".
   await pool.query('DELETE FROM team_members WHERE name = $1', ['Cauê Soares Valente']);
 
-  await upsertContact({ phone: '+5511999990001', name: 'Aluno de teste 1' });
-  await upsertContact({ phone: '+5511999990002', name: 'Responsável de teste 2' });
+  // Contatos de teste só com SEED_TEST_CONTACTS=true (ambiente local): em
+  // produção a lista de envio não pode receber números fictícios.
+  if (process.env.SEED_TEST_CONTACTS === 'true') {
+    await upsertContact({ phone: '+5511999990001', name: 'Aluno de teste 1' });
+    await upsertContact({ phone: '+5511999990002', name: 'Responsável de teste 2' });
+  }
 
   await pool.end();
 }

@@ -94,6 +94,16 @@ com o texto que o workflow deve reenviar ao contato:
 Um contato que ainda não deu opt-in só recebe a instrução de enviar
 `ENTRAR` — nenhuma outra funcionalidade do bot roda antes disso (RNF-03).
 
+Contatos de teste: `npm run seed` só cria os dois contatos fictícios com
+`SEED_TEST_CONTACTS=true` no `.env` (ambiente local), para que números
+fictícios nunca entrem na lista de envio de produção — lá os contatos vêm do
+opt-in pelo chatbot (`ENTRAR`).
+
+Deploy em produção: rode `npm run migrate` **antes** de publicar o frontend
+da Sprint, e configure `N8N_WEBHOOK_URL`/`N8N_WEBHOOK_SECRET`. Sem contatos
+com opt-in, o disparo é recusado com "Nenhum contato com opt-in ativo" (a
+oportunidade não é alterada).
+
 ## Como testar (critérios de aceite, seção 9 do Documento de Escopo)
 
 Casos de sucesso e de erro exercitados manualmente / via curl:
