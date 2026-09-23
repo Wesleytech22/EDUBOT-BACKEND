@@ -1,0 +1,40 @@
+#!/bin/sh
+# Bloqueia commits com segredos (RNF-08). Ativado automaticamente pelo
+# `npm install` (script "prepare" -> git config core.hooksPath .githooks).
+# Tokens e chaves ficam só nos arquivos .env, que o git ignora.
+
+# Mensagens vão para o stderr: o bloqueio não depende de quem lê a saída.
+exec 1>&2
+# Se quem lê a saída fechar o pipe, o hook não pode morrer (SIGPIPE) e
+# deixar o commit passar: ignora o sinal e segue até o exit 1.
+trap "" PIPE
+
+fail=0
+
+# 1) Nenhum arquivo .env (exceto .env.example) pode entrar no commit.
+envfiles=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$')
+if [ -n "$envfiles" ]; then
+  echo "✖ Arquivo .env no commit (ele guarda segredos e deve ficar só local):"
+  echo "$envfiles" | sed 's/^/    /'
+  fail=1
+fi
+
+# 2) Padrões de segredo nas linhas adicionadas.
+patterns='[0-9]{8,10}:AA[0-9A-Za-z_-]{30,}'          # token de bot do Telegram
+patterns="$patterns|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+patterns="$patterns|re_[0-9A-Za-z]{20,}"              # chave da API do Resend
+patterns="$patterns|postgres(ql)?://[^:@/ ]+:[^@/ ]+@" # URL de banco com senha
+
+hits=$(git diff --cached -U0 --diff-filter=ACMR | grep -E '^\+[^+]' | grep -nE "$patterns")
+if [ -n "$hits" ]; then
+  echo "✖ Possível segredo no commit — mova o valor para o .env:"
+  echo "$hits" | cut -c1-120 | sed 's/^/    /'
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo ""
+  echo "Commit bloqueado. Se for um falso positivo, revise e use --no-verify conscientemente."
+  exit 1
+fi
+exit 0
