@@ -73,26 +73,16 @@ calculado automaticamente a partir de `deadline` (RF-03).
    marcados como `falha` com o motivo, em vez de ficarem pendentes para
    sempre (mitigação do risco R-02).
 
-### Fluxo conversacional (RF-07 a RF-11)
+Cadastro de contatos: RF-10 (opt-in pelo próprio WhatsApp) só chega no
+Módulo D, na Sprint 04. Até lá, `npm run seed` povoa dois contatos de teste
+para o broadcast poder ser exercitado localmente — só com
+`SEED_TEST_CONTACTS=true` no `.env`, para que números fictícios nunca entrem
+na lista de envio de produção.
 
-`POST /api/webhooks/whatsapp/inbound` recebe `{ phone, name, message }` —
-uma mensagem relayada pelo N8N a partir do WAHA — e devolve `{ reply }`
-com o texto que o workflow deve reenviar ao contato:
-
-- **Opt-in/opt-out (RF-10, RF-11)**: comandos `ENTRAR`/`INICIAR`/`START` e
-  `SAIR`/`PARAR`/`STOP` atualizam `contacts.opt_in` na hora e gravam um
-  registro em `consent_logs` (tipo, origem e data/hora).
-- **Menu (RF-08)**: comando `MENU` lista as oportunidades ativas.
-- **FAQ (RF-07)**: qualquer outra mensagem é casada por substring contra o
-  título das oportunidades ativas — casamento simples por palavra-chave,
-  sem NLP/classificação de intenção, adequado ao escopo do MVP e ao RNF-01
-  (resposta em menos de 5s).
-- **Atendimento humano (RF-09)**: comando `ATENDENTE`, ou qualquer mensagem
-  que o casamento por título não resolveu, cria um registro em
-  `support_requests` (consultável por `GET /api/support-requests`).
-
-Um contato que ainda não deu opt-in só recebe a instrução de enviar
-`ENTRAR` — nenhuma outra funcionalidade do bot roda antes disso (RNF-03).
+Deploy em produção: rode `npm run migrate` (cria `contacts` e
+`dispatch_logs`) **antes** de publicar o frontend desta Sprint, e configure
+`N8N_WEBHOOK_URL`/`N8N_WEBHOOK_SECRET`. Sem contatos com opt-in, o disparo é
+recusado com "Nenhum contato com opt-in ativo" (a oportunidade não é alterada).
 
 ## Como testar (critérios de aceite, seção 9 do Documento de Escopo)
 
