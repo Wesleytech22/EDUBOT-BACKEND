@@ -1,5 +1,5 @@
 const express = require('express');
-const { create, list, getById, update, dispatch, listDispatchLogs } = require('../controllers/opportunities.controller');
+const { create, list, getById, update, dispatch, resendFailures, listDispatchLogs } = require('../controllers/opportunities.controller');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 // Anexo da oportunidade (RF-01): PDF, PNG ou JPG de até 5 MB.
@@ -37,7 +37,6 @@ router.get('/:id/dispatch-logs', listDispatchLogs);
 router.post('/', requireRole('administrador'), create);
 router.put('/:id', requireRole('administrador'), update);
 router.patch('/:id/dispatch', requireRole('administrador'), dispatch);
-router.put('/:id/attachment', requireRole('administrador'), uploadAttachment, attachments.upload);
-router.delete('/:id/attachment', requireRole('administrador'), attachments.remove);
+router.post('/:id/dispatch/resend-failures', requireRole('administrador'), resendFailures);
 
 module.exports = router;

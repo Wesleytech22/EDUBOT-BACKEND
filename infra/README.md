@@ -1,4 +1,4 @@
-# Infra — Sprint 02
+# Infra — Sprints 02 e 03
 
 Ambiente de teste para as dependências externas do EduBot (RF-01 a RF-03,
 dependências da seção 5.9 do Documento de Escopo): PostgreSQL, N8N e WAHA.
@@ -19,6 +19,31 @@ docker compose up -d
 | PostgreSQL | 5432 | usado pelo backend (`../`), ver `.env.example` da raiz |
 | N8N | 5678 | http://localhost:5678 (basic auth) |
 | WAHA | 3001 | http://localhost:3001 — conectar o número de WhatsApp dedicado escaneando o QR code em `/api/sessions` |
+
+## Workflow de broadcast (Sprint 03)
+
+O workflow do N8N fica versionado em `n8n/broadcast-mock.json` (webhook
+`POST /webhook/broadcast` → monta a lista de contatos → simula o envio da
+WAHA → callback em `POST /api/webhooks/n8n/dispatch-status`). Depois de subir
+os contêineres pela primeira vez, importe e ative:
+
+```bash
+docker compose cp n8n/broadcast-mock.json n8n:/tmp/wf.json
+docker compose exec n8n n8n import:workflow --input=/tmp/wf.json
+docker compose exec n8n n8n update:workflow --id=sPCtekMhtu4pQ9IA --active=true
+docker compose restart n8n
+```
+
+O header `X-Webhook-Secret` do callback vem da variável `N8N_WEBHOOK_SECRET`
+deste `.env` (repassada ao N8N como `EDUBOT_WEBHOOK_SECRET`) e precisa ser
+igual ao `N8N_WEBHOOK_SECRET` do `.env` da raiz do backend — senão o callback
+recebe 401 e os envios ficam presos em "pendente". Na raiz, o backend aponta
+para `N8N_WEBHOOK_URL=http://localhost:5678/webhook/broadcast`.
+
+Se o Docker Desktop estiver desligado, o disparo não é desfeito, mas todos os
+logs ficam como "falha" com o motivo "Falha ao contatar o N8N". Depois de
+subir o ambiente, use "Reenviar para quem falhou" na tela de Resultado do
+Disparo (RF-32).
 
 ## Notas
 
