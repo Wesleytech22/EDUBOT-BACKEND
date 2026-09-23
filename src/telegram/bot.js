@@ -34,6 +34,17 @@ const SLASH_COMMANDS = {
   '/atendente': 'ATENDENTE',
 };
 
+// O token vive só no .env (TELEGRAM_BOT_TOKEN). Qualquer texto que possa
+// ir para log, banco ou tela passa por aqui para nunca expor o token.
+function redact(text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const value = String(text ?? '');
+  return token ? value.split(token).join('***') : value;
+}
+
+// Formato oficial do token do @BotFather: <id numérico>:<35 caracteres>.
+const TOKEN_FORMAT = /^\d{6,12}:[A-Za-z0-9_-]{30,}$/;
+
 function apiUrl(method) {
   const base = process.env.TELEGRAM_API_URL || 'https://api.telegram.org';
   return `${base}/bot${process.env.TELEGRAM_BOT_TOKEN}/${method}`;
@@ -50,7 +61,7 @@ async function callTelegram(method, payload, { timeoutMs = 10000 } = {}) {
       signal: controller.signal,
     });
     const data = await res.json();
-    if (!data.ok) throw new Error(data.description || `Telegram respondeu ${res.status}`);
+    if (!data.ok) throw new Error(redact(data.description || `Telegram respondeu ${res.status}`));
     return data.result;
   } finally {
     clearTimeout(timer);
@@ -151,11 +162,11 @@ async function pollLoop() {
         try {
           await handleUpdate(update);
         } catch (err) {
-          console.error('[telegram] erro ao processar mensagem:', err.message);
+          console.error('[telegram] erro ao processar mensagem:', redact(err.message));
         }
       }
     } catch (err) {
-      console.error('[telegram] falha no getUpdates:', err.message);
+      console.error('[telegram] falha no getUpdates:', redact(err.message));
       await sleep(RETRY_DELAY_MS);
     }
   }
@@ -163,6 +174,10 @@ async function pollLoop() {
 
 function startTelegramBot() {
   if (!process.env.TELEGRAM_BOT_TOKEN) return;
+  if (!TOKEN_FORMAT.test(process.env.TELEGRAM_BOT_TOKEN)) {
+    console.error('[telegram] TELEGRAM_BOT_TOKEN com formato inválido — canal Telegram desligado.');
+    return;
+  }
   console.log('Canal Telegram ativo (long polling).');
   pollLoop();
 }

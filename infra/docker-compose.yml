@@ -1,3 +1,6 @@
+# Segredos (senha do N8N, secret do callback, chave da WAHA) não têm valor
+# padrão: o compose falha se não estiverem no infra/.env — nada fica fixo no
+# código versionado.
 services:
   postgres:
     image: postgres:16
@@ -24,7 +27,7 @@ services:
     environment:
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-changeme}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:?defina N8N_BASIC_AUTH_PASSWORD no infra/.env}
       - N8N_HOST=${N8N_HOST:-localhost}
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
@@ -32,12 +35,13 @@ services:
       - GENERIC_TIMEZONE=America/Sao_Paulo
       # Secret do callback N8N -> backend (header X-Webhook-Secret); deve ser
       # igual ao N8N_WEBHOOK_SECRET do .env da raiz do backend.
-      - EDUBOT_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET:-edubot-dev-secret}
+      - EDUBOT_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET:?defina N8N_WEBHOOK_SECRET no infra/.env}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       # Chatbot (Sprint 04): URL do backend fora do Docker e chave da WAHA para responder.
       - EDUBOT_BACKEND_URL=${EDUBOT_BACKEND_URL:-http://host.docker.internal:4000}
-      - WAHA_API_KEY=${WAHA_API_KEY:-changeme}
+      - WAHA_API_KEY=${WAHA_API_KEY:?defina WAHA_API_KEY no infra/.env}
       # Canal Telegram: token do bot (mesmo do .env da raiz) para o broadcast.
+      # Opcional: vazio = canal desligado. Nunca coloque o token aqui.
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_API_URL=${TELEGRAM_API_URL:-https://api.telegram.org}
     extra_hosts:
@@ -53,7 +57,7 @@ services:
     ports:
       - "${WAHA_PORT:-3001}:3000"
     environment:
-      - WHATSAPP_API_KEY=${WAHA_API_KEY:-changeme}
+      - WHATSAPP_API_KEY=${WAHA_API_KEY:?defina WAHA_API_KEY no infra/.env}
       - WHATSAPP_HOOK_URL=${WAHA_HOOK_URL:-http://n8n:5678/webhook/waha}
       - WHATSAPP_HOOK_EVENTS=message,message.any
       - WHATSAPP_DEFAULT_ENGINE=GOWS

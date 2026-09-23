@@ -106,6 +106,16 @@ Como funciona:
 
 Limitação de produto: a família precisa ter o Telegram instalado — o escopo
 original (EX-03) prevê o canal que a família já usa (WhatsApp).
+## Segredos
+
+- Tokens e chaves (secret do callback, chave da WAHA, senha do N8N, token do
+  Telegram) ficam **só** nos arquivos `.env` e `infra/.env`, ignorados pelo
+  git. O `docker-compose.yml` não tem valor padrão para eles: sem o
+  `infra/.env` preenchido, o `docker compose up` falha com a variável que
+  falta, em vez de subir com uma senha conhecida.
+- O `npm install` ativa o hook `.githooks/pre-commit`, que bloqueia commits
+  com arquivo `.env` ou com padrão de segredo (token de bot do Telegram,
+  chave privada, chave da API do Resend, URL de banco com senha).
 
 ## Notas
 
