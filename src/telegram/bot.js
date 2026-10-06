@@ -183,4 +183,4 @@ function startTelegramBot() {
   pollLoop();
 }
 
-module.exports = { startTelegramBot, handleUpdate };
+module.exports = { startTelegramBot, handleUpdate, callTelegram, apiUrl, redact };
