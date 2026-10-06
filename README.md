@@ -23,7 +23,7 @@ Módulo B (RF-04 a RF-06) e, a partir desta Sprint, Módulo C — Chatbot FAQ
 cp .env.example .env        # ajuste as credenciais se necessário
 npm install
 npm run migrate             # cria/atualiza as tabelas (users, opportunities, logs, contacts, dispatch_logs, consent_logs, support_requests, ...)
-npm run seed                # cria as contas de acesso e os contatos de teste do broadcast
+npm run seed                # cria as contas de acesso e a equipe (Sobre Nós)
 npm run dev                 # inicia em http://localhost:4000
 ```
 
@@ -79,10 +79,32 @@ para o broadcast poder ser exercitado localmente — só com
 `SEED_TEST_CONTACTS=true` no `.env`, para que números fictícios nunca entrem
 na lista de envio de produção.
 
-Deploy em produção: rode `npm run migrate` (cria `contacts` e
-`dispatch_logs`) **antes** de publicar o frontend desta Sprint, e configure
-`N8N_WEBHOOK_URL`/`N8N_WEBHOOK_SECRET`. Sem contatos com opt-in, o disparo é
-recusado com "Nenhum contato com opt-in ativo" (a oportunidade não é alterada).
+`POST /api/webhooks/whatsapp/inbound` recebe `{ phone, name, message }` —
+uma mensagem relayada pelo N8N a partir do WAHA — e devolve `{ reply }`
+com o texto que o workflow deve reenviar ao contato:
+
+- **Opt-in/opt-out (RF-10, RF-11)**: comandos `ENTRAR`/`INICIAR`/`START` e
+  `SAIR`/`PARAR`/`STOP` atualizam `contacts.opt_in` na hora e gravam um
+  registro em `consent_logs` (tipo, origem e data/hora).
+- **Menu (RF-08)**: comando `MENU` lista as oportunidades ativas.
+- **FAQ (RF-07)**: qualquer outra mensagem é casada por substring contra o
+  título das oportunidades ativas — casamento simples por palavra-chave,
+  sem NLP/classificação de intenção, adequado ao escopo do MVP e ao RNF-01
+  (resposta em menos de 5s).
+- **Atendimento humano (RF-09)**: comando `ATENDENTE`, ou qualquer mensagem
+  que o casamento por título não resolveu, cria um registro em
+  `support_requests` (consultável por `GET /api/support-requests`).
+
+Um contato que ainda não deu opt-in só recebe a instrução de enviar
+`ENTRAR` — nenhuma outra funcionalidade do bot roda antes disso (RNF-03).
+
+Os contatos da lista de envio vêm só do opt-in pelo chatbot (`ENTRAR`); o seed
+não cria contatos fictícios.
+
+Deploy em produção: rode `npm run migrate` **antes** de publicar o frontend
+da Sprint, e configure `N8N_WEBHOOK_URL`/`N8N_WEBHOOK_SECRET`. Sem contatos
+com opt-in, o disparo é recusado com "Nenhum contato com opt-in ativo" (a
+oportunidade não é alterada).
 
 ## Como testar (critérios de aceite, seção 9 do Documento de Escopo)
 
@@ -153,7 +175,7 @@ src/
   db/
     pool.js                    # pool de conexão pg
     migrate.js                 # aplica migrations/*.sql
-    seed.js                    # cria contas (RF-20), equipe (Sobre Nós) e contatos de teste (RF-04)
+    seed.js                    # cria contas (RF-20), equipe (Sobre Nós) e equipe (Sobre Nós)
     migrations/
       001_init.sql             # users, opportunities, logs
       005_broadcast.sql        # contacts, dispatch_logs (RF-04 a RF-06)
