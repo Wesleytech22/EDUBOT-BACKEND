@@ -73,11 +73,7 @@ calculado automaticamente a partir de `deadline` (RF-03).
    marcados como `falha` com o motivo, em vez de ficarem pendentes para
    sempre (mitigação do risco R-02).
 
-Cadastro de contatos: RF-10 (opt-in pelo próprio WhatsApp) só chega no
-Módulo D, na Sprint 04. Até lá, `npm run seed` povoa dois contatos de teste
-para o broadcast poder ser exercitado localmente — só com
-`SEED_TEST_CONTACTS=true` no `.env`, para que números fictícios nunca entrem
-na lista de envio de produção.
+### Fluxo conversacional (RF-07 a RF-11)
 
 `POST /api/webhooks/whatsapp/inbound` recebe `{ phone, name, message }` —
 uma mensagem relayada pelo N8N a partir do WAHA — e devolve `{ reply }`
