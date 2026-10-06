@@ -2,6 +2,50 @@ const pool = require('../db/pool');
 const { classifyStatus } = require('../utils/classifyStatus');
 const { triggerBroadcastWorkflow, buildBroadcastMessage } = require('../utils/n8n');
 const { hasAttachment, getAttachmentForBroadcast } = require('./opportunityAttachments.controller');
+const { sendBroadcastViaTelegram } = require('../telegram/broadcast');
+
+// Entrega o broadcast pelo canal disponível e resolve os dispatch_logs.
+// Com TELEGRAM_BOT_TOKEN, o próprio backend envia pelo bot e grava o status
+// de cada contato na hora (hotfix: em produção não há N8N). Sem o token,
+// segue o caminho original: aciona o workflow do N8N, que responde pelo
+// callback em POST /api/webhooks/n8n/dispatch-status.
+async function deliverBroadcast({ opportunity, contacts, callbackUrl, attachment }) {
+  const message = buildBroadcastMessage(opportunity);
+
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    const results = await sendBroadcastViaTelegram({ contacts, message, attachment });
+    for (const r of results) {
+      await pool.query('UPDATE dispatch_logs SET status = $1, detail = $2, updated_at = now() WHERE id = $3', [
+        r.status,
+        r.detail,
+        r.logId,
+      ]);
+    }
+    const sent = results.filter((r) => r.status === 'enviado').length;
+    return { ok: true, channel: 'telegram', sent, failed: results.length - sent };
+  }
+
+  const result = await triggerBroadcastWorkflow({ opportunity, contacts, message, callbackUrl, attachment });
+  // Sem N8N acessível (dev/CI), os logs seguem marcados de imediato — com o
+  // N8N no ar, o callback do workflow é quem resolve 'pendente' (RF-06).
+  if (!result.ok) {
+    await pool.query(
+      `UPDATE dispatch_logs SET status = 'falha', detail = $1, updated_at = now()
+       WHERE id = ANY($2::int[])`,
+      [result.error, contacts.map((c) => c.logId)]
+    );
+  }
+  return { ...result, channel: 'n8n' };
+}
+
+function describeDelivery(result, count, action) {
+  if (result.channel === 'telegram') {
+    return `${action} pelo Telegram para ${count} contato(s): ${result.sent} entregue(s), ${result.failed} com falha.`;
+  }
+  return result.ok
+    ? `${action} acionado no N8N para ${count} contato(s).`
+    : `${action} acionado, mas o N8N não confirmou o recebimento: ${result.error}`;
+}
 
 function serialize(row) {
   return {
@@ -177,7 +221,7 @@ async function dispatch(req, res, next) {
     const logIdByContactId = new Map(logRows.map((l) => [l.contact_id, l.id]));
 
     const callbackUrl = `${req.protocol}://${req.get('host')}/api/webhooks/n8n/dispatch-status`;
-    const result = await triggerBroadcastWorkflow({
+    const result = await deliverBroadcast({
       opportunity,
       contacts: contacts.map((c) => ({
         logId: logIdByContactId.get(c.id),
@@ -185,31 +229,13 @@ async function dispatch(req, res, next) {
         name: c.name,
         telegramChatId: c.telegram_chat_id,
       })),
-      message: buildBroadcastMessage(opportunity),
       callbackUrl,
       attachment: await getAttachmentForBroadcast(current.id),
     });
 
-    // Sem N8N acessível (dev/CI), os logs seguem marcados de imediato — em
-    // produção o callback do workflow é quem resolve 'pendente' (RF-06).
-    if (!result.ok) {
-      await pool.query(
-        `UPDATE dispatch_logs SET status = 'falha', detail = $1, updated_at = now()
-         WHERE id = ANY($2::int[])`,
-        [result.error, logRows.map((l) => l.id)]
-      );
-    }
-
     await pool.query(
       'INSERT INTO logs (type, user_id, opportunity_id, detail) VALUES ($1,$2,$3,$4)',
-      [
-        'disparo',
-        req.user.sub,
-        req.params.id,
-        result.ok
-          ? `Broadcast acionado no N8N para ${contacts.length} contato(s).`
-          : `Broadcast acionado, mas o N8N não confirmou o recebimento: ${result.error}`,
-      ]
+      ['disparo', req.user.sub, req.params.id, describeDelivery(result, contacts.length, 'Broadcast')]
     );
 
     return res.json({ ...opportunity, dispatchLogsCreated: logRows.length, n8n: result });
@@ -241,7 +267,7 @@ async function resendFailures(req, res, next) {
 
     const opportunity = serialize(current);
     const callbackUrl = `${req.protocol}://${req.get('host')}/api/webhooks/n8n/dispatch-status`;
-    const result = await triggerBroadcastWorkflow({
+    const result = await deliverBroadcast({
       opportunity,
       contacts: failedRows.map((r) => ({
         logId: r.log_id,
@@ -249,29 +275,13 @@ async function resendFailures(req, res, next) {
         name: r.name,
         telegramChatId: r.telegram_chat_id,
       })),
-      message: buildBroadcastMessage(opportunity),
       callbackUrl,
       attachment: await getAttachmentForBroadcast(current.id),
     });
 
-    if (!result.ok) {
-      await pool.query(
-        `UPDATE dispatch_logs SET status = 'falha', detail = $1, updated_at = now()
-         WHERE id = ANY($2::int[])`,
-        [result.error, failedRows.map((r) => r.log_id)]
-      );
-    }
-
     await pool.query(
       'INSERT INTO logs (type, user_id, opportunity_id, detail) VALUES ($1,$2,$3,$4)',
-      [
-        'disparo',
-        req.user.sub,
-        req.params.id,
-        result.ok
-          ? `Reenvio acionado no N8N para ${failedRows.length} contato(s) com falha.`
-          : `Reenvio acionado, mas o N8N não confirmou o recebimento: ${result.error}`,
-      ]
+      ['disparo', req.user.sub, req.params.id, describeDelivery(result, failedRows.length, 'Reenvio')]
     );
 
     return res.json({ resent: failedRows.length, n8n: result });
