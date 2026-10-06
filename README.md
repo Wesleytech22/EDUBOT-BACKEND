@@ -23,7 +23,7 @@ Módulo B (RF-04 a RF-06) e, a partir desta Sprint, Módulo C — Chatbot FAQ
 cp .env.example .env        # ajuste as credenciais se necessário
 npm install
 npm run migrate             # cria/atualiza as tabelas (users, opportunities, logs, contacts, dispatch_logs, consent_logs, support_requests, ...)
-npm run seed                # cria as contas de acesso e os contatos de teste do broadcast
+npm run seed                # cria as contas de acesso e a equipe (Sobre Nós)
 npm run dev                 # inicia em http://localhost:4000
 ```
 
@@ -94,10 +94,8 @@ com o texto que o workflow deve reenviar ao contato:
 Um contato que ainda não deu opt-in só recebe a instrução de enviar
 `ENTRAR` — nenhuma outra funcionalidade do bot roda antes disso (RNF-03).
 
-Contatos de teste: `npm run seed` só cria os dois contatos fictícios com
-`SEED_TEST_CONTACTS=true` no `.env` (ambiente local), para que números
-fictícios nunca entrem na lista de envio de produção — lá os contatos vêm do
-opt-in pelo chatbot (`ENTRAR`).
+Os contatos da lista de envio vêm só do opt-in pelo chatbot (`ENTRAR`); o seed
+não cria contatos fictícios.
 
 Deploy em produção: rode `npm run migrate` **antes** de publicar o frontend
 da Sprint, e configure `N8N_WEBHOOK_URL`/`N8N_WEBHOOK_SECRET`. Sem contatos
@@ -173,7 +171,7 @@ src/
   db/
     pool.js                    # pool de conexão pg
     migrate.js                 # aplica migrations/*.sql
-    seed.js                    # cria contas (RF-20), equipe (Sobre Nós) e contatos de teste (RF-04)
+    seed.js                    # cria contas (RF-20), equipe (Sobre Nós) e equipe (Sobre Nós)
     migrations/
       001_init.sql             # users, opportunities, logs
       005_broadcast.sql        # contacts, dispatch_logs (RF-04 a RF-06)

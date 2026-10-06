@@ -20,19 +20,11 @@ docker compose up -d
 | N8N | 5678 | http://localhost:5678 (basic auth) |
 | WAHA | 3001 | http://localhost:3001 — conectar o número de WhatsApp dedicado escaneando o QR code em `/api/sessions` |
 
-## Workflow de broadcast (Sprint 03)
+## Workflow de broadcast
 
-O workflow do N8N fica versionado em `n8n/broadcast-mock.json` (webhook
-`POST /webhook/broadcast` → monta a lista de contatos → simula o envio da
-WAHA → callback em `POST /api/webhooks/n8n/dispatch-status`). Depois de subir
-os contêineres pela primeira vez, importe e ative:
-
-```bash
-docker compose cp n8n/broadcast-mock.json n8n:/tmp/wf.json
-docker compose exec n8n n8n import:workflow --input=/tmp/wf.json
-docker compose exec n8n n8n update:workflow --id=sPCtekMhtu4pQ9IA --active=true
-docker compose restart n8n
-```
+O workflow do N8N (`n8n/broadcast-telegram.json`) e a sua importação estão
+descritos na seção do canal Telegram, mais abaixo. O callback para
+`POST /api/webhooks/n8n/dispatch-status` é autenticado assim:
 
 O header `X-Webhook-Secret` do callback vem da variável `N8N_WEBHOOK_SECRET`
 deste `.env` (repassada ao N8N como `EDUBOT_WEBHOOK_SECRET`) e precisa ser
@@ -143,5 +135,5 @@ original (EX-03) prevê o canal que a família já usa (WhatsApp).
   celular), testado nos três engines e em duas redes diferentes — não é bug
   da nossa infra, é uma medida anti-abuso contra bibliotecas não-oficiais
   (Baileys/whatsmeow/whatsapp-web.js). O fluxo de broadcast (Sprint 03) foi
-  validado ponta a ponta com um workflow de N8N que simula o envio (mock),
-  sem depender do WhatsApp real estar conectado.
+  validado ponta a ponta pelo canal do Telegram, sem depender do WhatsApp real
+  estar conectado.
