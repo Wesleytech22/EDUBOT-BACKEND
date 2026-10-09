@@ -8,6 +8,7 @@ const teamRoutes = require('./routes/team.routes');
 const webhooksRoutes = require('./routes/webhooks.routes');
 const metricsRoutes = require('./routes/metrics.routes');
 const supportRoutes = require('./routes/support.routes');
+const backupsRoutes = require('./routes/backups.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -40,6 +41,7 @@ app.use('/api/team', teamRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/support-requests', supportRoutes);
+app.use('/api/backups', backupsRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
