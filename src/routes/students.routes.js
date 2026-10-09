@@ -1,10 +1,10 @@
 const express = require('express');
 const { list, summary, syncStatus, triggerSync, exportCsv } = require('../controllers/students.controller');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, requireSchool } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.use(requireAuth, requireRole('administrador', 'equipe_escola'));
+router.use(requireAuth, requireRole('administrador', 'equipe_escola'), requireSchool);
 
 router.get('/', list);
 router.get('/summary', summary);

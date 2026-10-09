@@ -8,7 +8,7 @@ const {
   previewSheet,
   listSyncRuns,
 } = require('../controllers/integrations.controller');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, requireSchool } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -16,7 +16,7 @@ const router = express.Router();
 // uma planilha escolar em CSV.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-router.use(requireAuth, requireRole('administrador', 'equipe_escola'));
+router.use(requireAuth, requireRole('administrador', 'equipe_escola'), requireSchool);
 
 router.get('/sheets/config', getSheetConfig);
 router.put('/sheets/config', requireRole('administrador'), updateSheetConfig);

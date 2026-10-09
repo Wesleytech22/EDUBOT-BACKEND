@@ -16,10 +16,11 @@ function serialize(row) {
 }
 
 // Filtros compartilhados entre a listagem e a exportação em CSV.
-function buildFilters(query) {
+// Multi-escola — sempre começa pela escola de quem está logado.
+function buildFilters(query, schoolId) {
   const { search, grade, situation, schoolYear } = query;
-  const where = [];
-  const params = [];
+  const params = [schoolId];
+  const where = ['school_id = $1'];
 
   if (search) {
     params.push(`%${search}%`);
@@ -38,16 +39,19 @@ function buildFilters(query) {
     where.push(`school_year = $${params.length}`);
   }
 
-  return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
+  return { clause: `WHERE ${where.join(' AND ')}`, params };
 }
 
 // Visualização consolidada dos alunos, com busca e filtros por série e
 // situação. Somente leitura — a planilha da escola é a única fonte de escrita.
 async function list(req, res, next) {
   try {
-    const { clause, params } = buildFilters(req.query);
+    const { clause, params } = buildFilters(req.query, req.schoolId);
     const { rows } = await pool.query(`SELECT * FROM students ${clause} ORDER BY name ASC`, params);
-    const { rows: gradeRows } = await pool.query('SELECT DISTINCT grade FROM students ORDER BY grade ASC');
+    const { rows: gradeRows } = await pool.query(
+      'SELECT DISTINCT grade FROM students WHERE school_id = $1 ORDER BY grade ASC',
+      [req.schoolId]
+    );
     return res.json({ items: rows.map(serialize), total: rows.length, grades: gradeRows.map((r) => r.grade) });
   } catch (err) {
     return next(err);
@@ -65,7 +69,8 @@ async function summary(req, res, next) {
               COUNT(*) FILTER (WHERE situation = 'Regular')::int AS regular,
               COUNT(*) FILTER (WHERE situation = 'Atenção')::int AS attention,
               COUNT(*) FILTER (WHERE situation = 'Risco')::int AS risk
-       FROM students`
+       FROM students WHERE school_id = $1`,
+      [req.schoolId]
     );
     const r = rows[0];
     return res.json({
@@ -84,10 +89,17 @@ async function summary(req, res, next) {
 async function syncStatus(req, res, next) {
   try {
     const { rows: lastSuccess } = await pool.query(
-      "SELECT created_at FROM sync_runs WHERE status = 'sucesso' ORDER BY created_at DESC LIMIT 1"
+      "SELECT created_at FROM sync_runs WHERE school_id = $1 AND status = 'sucesso' ORDER BY created_at DESC LIMIT 1",
+      [req.schoolId]
     );
-    const { rows: lastRun } = await pool.query('SELECT * FROM sync_runs ORDER BY created_at DESC LIMIT 1');
-    const { rows: config } = await pool.query('SELECT source, sheet_id, uploaded_rows FROM sheet_config WHERE id = 1');
+    const { rows: lastRun } = await pool.query(
+      'SELECT * FROM sync_runs WHERE school_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [req.schoolId]
+    );
+    const { rows: config } = await pool.query(
+      'SELECT source, sheet_id, uploaded_rows FROM sheet_config WHERE school_id = $1',
+      [req.schoolId]
+    );
     const c = config[0];
 
     return res.json({
@@ -111,7 +123,7 @@ async function syncStatus(req, res, next) {
 // Sincronização imediata, além da rotina automática.
 async function triggerSync(req, res, next) {
   try {
-    const result = await syncStudentsFromSheet({ trigger: 'manual' });
+    const result = await syncStudentsFromSheet({ schoolId: req.schoolId, trigger: 'manual' });
     return res.status(result.status === 'sucesso' ? 200 : 502).json(result);
   } catch (err) {
     return next(err);
@@ -130,7 +142,7 @@ function csvCell(value) {
 // para o Excel em português abrir com acentos e colunas certos.
 async function exportCsv(req, res, next) {
   try {
-    const { clause, params } = buildFilters(req.query);
+    const { clause, params } = buildFilters(req.query, req.schoolId);
     const { rows } = await pool.query(`SELECT * FROM students ${clause} ORDER BY name ASC`, params);
 
     const header = ['Nome', 'Série', 'Presenças', 'Faltas', 'Frequência (%)', 'Situação', 'Última atualização'];

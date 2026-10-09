@@ -10,6 +10,7 @@ const metricsRoutes = require('./routes/metrics.routes');
 const supportRoutes = require('./routes/support.routes');
 const integrationsRoutes = require('./routes/integrations.routes');
 const studentsRoutes = require('./routes/students.routes');
+const schoolsRoutes = require('./routes/schools.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -44,6 +45,7 @@ app.use('/api/metrics', metricsRoutes);
 app.use('/api/support-requests', supportRoutes);
 app.use('/api/integrations', integrationsRoutes);
 app.use('/api/students', studentsRoutes);
+app.use('/api/schools', schoolsRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

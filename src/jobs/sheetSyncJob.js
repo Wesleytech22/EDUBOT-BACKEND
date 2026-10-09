@@ -8,22 +8,26 @@ const { syncStudentsFromSheet } = require('../utils/studentsSync');
 // servidor. SHEET_SYNC_ENABLED=false desliga a rotina (ex.: em dev local).
 const CHECK_EVERY_MS = 60 * 1000;
 
+// Multi-escola — percorre as escolas ativas com planilha configurada, cada
+// uma na própria frequência; uma escola com falha não atrasa as outras.
 async function tick() {
   const { rows } = await pool.query(
-    `SELECT c.sync_interval_minutes,
-            (c.source = 'upload' AND c.uploaded_rows IS NOT NULL) OR (c.source = 'api' AND c.sheet_id IS NOT NULL) AS configured,
-            (SELECT MAX(created_at) FROM sync_runs) AS last_run_at,
+    `SELECT c.school_id, s.name AS school_name, c.sync_interval_minutes,
+            (SELECT MAX(created_at) FROM sync_runs r WHERE r.school_id = c.school_id) AS last_run_at,
             now() AS now
-     FROM sheet_config c WHERE c.id = 1`
+     FROM sheet_config c
+     JOIN schools s ON s.id = c.school_id AND s.active
+     WHERE c.sync_interval_minutes > 0
+       AND ((c.source = 'upload' AND c.uploaded_rows IS NOT NULL) OR (c.source = 'api' AND c.sheet_id IS NOT NULL))`
   );
-  const config = rows[0];
-  if (!config || !config.configured || config.sync_interval_minutes <= 0) return;
 
-  const elapsedMs = config.last_run_at ? config.now - config.last_run_at : Infinity;
-  if (elapsedMs < config.sync_interval_minutes * 60 * 1000) return;
+  for (const config of rows) {
+    const elapsedMs = config.last_run_at ? config.now - config.last_run_at : Infinity;
+    if (elapsedMs < config.sync_interval_minutes * 60 * 1000) continue;
 
-  const result = await syncStudentsFromSheet({ trigger: 'automatica' });
-  console.log(`[sync] sincronização automática: ${result.status} — ${result.detail}`);
+    const result = await syncStudentsFromSheet({ schoolId: config.school_id, trigger: 'automatica' });
+    console.log(`[sync] ${config.school_name}: ${result.status} — ${result.detail}`);
+  }
 }
 
 function startSheetSyncJob() {
@@ -36,4 +40,4 @@ function startSheetSyncJob() {
   }, CHECK_EVERY_MS);
 }
 
-module.exports = { startSheetSyncJob };
+module.exports = { startSheetSyncJob, runDueSyncs: tick };

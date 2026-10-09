@@ -2,7 +2,8 @@ const express = require('express');
 const multer = require('multer');
 const { create, list, getById, update, dispatch, resendFailures, listDispatchLogs } = require('../controllers/opportunities.controller');
 const attachments = require('../controllers/opportunityAttachments.controller');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const pool = require('../db/pool');
+const { requireAuth, requireRole, requireSchool } = require('../middleware/auth');
 
 // Anexo da oportunidade (RF-01): PDF, PNG ou JPG de até 5 MB.
 const ALLOWED_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
@@ -27,7 +28,21 @@ function uploadAttachment(req, res, next) {
 
 const router = express.Router();
 
-router.use(requireAuth, requireRole('administrador', 'equipe_escola'));
+router.use(requireAuth, requireRole('administrador', 'equipe_escola'), requireSchool);
+
+// Multi-escola — toda rota com :id (detalhe, edição, disparo, logs e anexo)
+// só alcança oportunidades da escola de quem está logado; de outra escola
+// responde como se não existisse.
+router.param('id', async (req, res, next, id) => {
+  try {
+    if (!/^\d+$/.test(id)) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
+    const { rows } = await pool.query('SELECT 1 FROM opportunities WHERE id = $1 AND school_id = $2', [id, req.schoolId]);
+    if (!rows[0]) return res.status(404).json({ error: 'Oportunidade não encontrada.' });
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+});
 
 // Leitura: Administrador e Equipe da Escola.
 router.get('/', list);

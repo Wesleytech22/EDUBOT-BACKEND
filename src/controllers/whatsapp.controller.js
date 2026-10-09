@@ -8,15 +8,28 @@ const COMMANDS = {
   HUMAN: ['ATENDENTE', 'HUMANO', 'FALAR COM ALGUEM', 'FALAR COM ALGUÉM'],
 };
 
-async function findOrCreateContact(phone, name) {
-  const { rows } = await pool.query('SELECT * FROM contacts WHERE phone = $1', [phone]);
-  if (rows[0]) return rows[0];
-
-  const { rows: created } = await pool.query(
-    `INSERT INTO contacts (phone, name, opt_in) VALUES ($1, $2, false) RETURNING *`,
-    [phone, name || null]
+// Multi-escola — o contato é sempre o da lista da escola com que a pessoa
+// está conversando (o mesmo telefone pode estar em mais de uma escola).
+async function findOrCreateContact(schoolId, phone, name) {
+  const { rows } = await pool.query(
+    `INSERT INTO contacts (school_id, phone, name, opt_in) VALUES ($1, $2, $3, false)
+     ON CONFLICT (school_id, phone) DO UPDATE SET name = COALESCE(contacts.name, EXCLUDED.name)
+     RETURNING *`,
+    [schoolId, phone, name || null]
   );
-  return created[0];
+  return rows[0];
+}
+
+// Escola do webhook do WhatsApp: a do slug na URL; sem slug, só funciona se
+// houver uma única escola ativa (compatível com a instalação de antes do
+// multi-escola, em que o N8N chamava /whatsapp/inbound sem escola).
+async function resolveSchoolForWebhook(slug) {
+  if (slug) {
+    const { rows } = await pool.query('SELECT id FROM schools WHERE slug = $1 AND active', [slug]);
+    return rows[0]?.id || null;
+  }
+  const { rows } = await pool.query('SELECT id FROM schools WHERE active LIMIT 2');
+  return rows.length === 1 ? rows[0].id : null;
 }
 
 // origin: canal por onde o consentimento chegou ('whatsapp' ou 'telegram').
@@ -35,8 +48,11 @@ async function logMessage(contactId, message, intent, opportunityId = null) {
   );
 }
 
-async function getActiveOpportunities() {
-  const { rows } = await pool.query('SELECT * FROM opportunities WHERE is_draft = false ORDER BY created_at DESC');
+async function getActiveOpportunities(schoolId) {
+  const { rows } = await pool.query(
+    'SELECT * FROM opportunities WHERE is_draft = false AND school_id = $1 ORDER BY created_at DESC',
+    [schoolId]
+  );
   return rows.map((row) => ({ ...row, status: classifyStatus(row) })).filter((o) => o.status === 'Ativa');
 }
 
@@ -89,8 +105,8 @@ async function matchOpportunityByTitle(message, activeOpportunities) {
 // encaminhamento humano), independente do canal: recebe a mensagem de um
 // contato (identificado pelo telefone) e devolve { reply } com o texto a
 // enviar de volta. Usado pelo webhook do N8N/WAHA e pelo bot do Telegram.
-async function processInboundMessage({ phone, name, message, origin = 'whatsapp' }) {
-  const contact = await findOrCreateContact(phone, name);
+async function processInboundMessage({ schoolId, phone, name, message, origin = 'whatsapp' }) {
+  const contact = await findOrCreateContact(schoolId, phone, name);
   const command = matchCommand(message);
 
   if (command === 'OPT_IN') {
@@ -124,7 +140,7 @@ async function processInboundMessage({ phone, name, message, origin = 'whatsapp'
     };
   }
 
-  const activeOpportunities = await getActiveOpportunities();
+  const activeOpportunities = await getActiveOpportunities(schoolId);
 
   if (command === 'MENU') {
     await logMessage(contact.id, message, 'menu');
@@ -170,7 +186,11 @@ async function handleInboundMessage(req, res, next) {
     if (!phone || !message) {
       return res.status(400).json({ error: 'Informe phone e message.' });
     }
-    return res.json(await processInboundMessage({ phone, name, message }));
+    const schoolId = await resolveSchoolForWebhook(req.params.schoolSlug);
+    if (!schoolId) {
+      return res.status(404).json({ error: 'Escola não encontrada. Use /whatsapp/inbound/<identificador-da-escola>.' });
+    }
+    return res.json(await processInboundMessage({ schoolId, phone, name, message }));
   } catch (err) {
     return next(err);
   }
@@ -184,7 +204,9 @@ async function listSupportRequests(req, res, next) {
               c.id AS contact_id, c.name AS contact_name, c.phone AS contact_phone
        FROM support_requests sr
        JOIN contacts c ON c.id = sr.contact_id
-       ORDER BY sr.created_at DESC`
+       WHERE c.school_id = $1
+       ORDER BY sr.created_at DESC`,
+      [req.schoolId]
     );
 
     return res.json({
@@ -209,8 +231,11 @@ async function updateSupportRequest(req, res, next) {
       return res.status(400).json({ error: 'Status deve ser "pendente" ou "atendido".' });
     }
     const { rows } = await pool.query(
-      'UPDATE support_requests SET status = $1 WHERE id = $2 RETURNING id, status',
-      [status, req.params.id]
+      `UPDATE support_requests sr SET status = $1
+       FROM contacts c
+       WHERE sr.id = $2 AND c.id = sr.contact_id AND c.school_id = $3
+       RETURNING sr.id, sr.status`,
+      [status, req.params.id, req.schoolId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Solicitação não encontrada.' });
     return res.json(rows[0]);

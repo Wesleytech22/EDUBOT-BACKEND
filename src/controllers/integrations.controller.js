@@ -7,8 +7,9 @@ const { syncStudentsFromSheet, extractStudents, NO_VALID_ROWS_MESSAGE } = requir
 const SYNC_INTERVAL_OPTIONS = [0, 15, 30, 60, 360, 1440];
 const PREVIEW_ROW_LIMIT = 20;
 
-async function getConfigRow() {
-  const { rows } = await pool.query('SELECT * FROM sheet_config WHERE id = 1');
+// Multi-escola — uma configuração de planilha por escola.
+async function getConfigRow(schoolId) {
+  const { rows } = await pool.query('SELECT * FROM sheet_config WHERE school_id = $1', [schoolId]);
   return rows[0] || null;
 }
 
@@ -35,7 +36,7 @@ function parseInterval(raw) {
 // Consulta qual planilha (link ao vivo ou arquivo anexado) está configurada.
 async function getSheetConfig(req, res, next) {
   try {
-    return res.json(serializeConfig(await getConfigRow()));
+    return res.json(serializeConfig(await getConfigRow(req.schoolId)));
   } catch (err) {
     return next(err);
   }
@@ -58,9 +59,9 @@ async function updateSheetConfig(req, res, next) {
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO sheet_config (id, source, sheet_id, sheet_range, sync_interval_minutes, updated_by, updated_at)
-       VALUES (1, 'api', $1, $2, COALESCE($3, 60), $4, now())
-       ON CONFLICT (id) DO UPDATE SET
+      `INSERT INTO sheet_config (school_id, source, sheet_id, sheet_range, sync_interval_minutes, updated_by, updated_at)
+       VALUES ($5, 'api', $1, $2, COALESCE($3, 60), $4, now())
+       ON CONFLICT (school_id) DO UPDATE SET
          source = 'api',
          sheet_id = EXCLUDED.sheet_id,
          sheet_range = EXCLUDED.sheet_range,
@@ -68,10 +69,10 @@ async function updateSheetConfig(req, res, next) {
          updated_by = EXCLUDED.updated_by,
          updated_at = now()
        RETURNING *`,
-      [sheetId, String(sheetRange || '').trim() || 'A:E', interval ?? null, req.user.sub]
+      [sheetId, String(sheetRange || '').trim() || 'A:E', interval ?? null, req.user.sub, req.schoolId]
     );
 
-    const sync = await syncStudentsFromSheet({ trigger: 'manual' });
+    const sync = await syncStudentsFromSheet({ schoolId: req.schoolId, trigger: 'manual' });
     return res.json({ config: serializeConfig(rows[0]), sync });
   } catch (err) {
     return next(err);
@@ -103,9 +104,9 @@ async function uploadSheetFile(req, res, next) {
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO sheet_config (id, source, uploaded_filename, uploaded_rows, uploaded_at, updated_by, updated_at)
-       VALUES (1, 'upload', $1, $2, now(), $3, now())
-       ON CONFLICT (id) DO UPDATE SET
+      `INSERT INTO sheet_config (school_id, source, uploaded_filename, uploaded_rows, uploaded_at, updated_by, updated_at)
+       VALUES ($4, 'upload', $1, $2, now(), $3, now())
+       ON CONFLICT (school_id) DO UPDATE SET
          source = 'upload',
          uploaded_filename = EXCLUDED.uploaded_filename,
          uploaded_rows = EXCLUDED.uploaded_rows,
@@ -113,10 +114,10 @@ async function uploadSheetFile(req, res, next) {
          updated_by = EXCLUDED.updated_by,
          updated_at = now()
        RETURNING *`,
-      [req.file.originalname.slice(0, 255), JSON.stringify(values), req.user.sub]
+      [req.file.originalname.slice(0, 255), JSON.stringify(values), req.user.sub, req.schoolId]
     );
 
-    const sync = await syncStudentsFromSheet({ trigger: 'manual' });
+    const sync = await syncStudentsFromSheet({ schoolId: req.schoolId, trigger: 'manual' });
     return res.json({ config: serializeConfig(rows[0]), rowCount: values.length, sync });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -132,14 +133,14 @@ async function updateSyncSettings(req, res, next) {
       return res.status(400).json({ error: 'Frequência de sincronização inválida.' });
     }
     const { rows } = await pool.query(
-      `INSERT INTO sheet_config (id, sync_interval_minutes, updated_by, updated_at)
-       VALUES (1, $1, $2, now())
-       ON CONFLICT (id) DO UPDATE SET
+      `INSERT INTO sheet_config (school_id, sync_interval_minutes, updated_by, updated_at)
+       VALUES ($3, $1, $2, now())
+       ON CONFLICT (school_id) DO UPDATE SET
          sync_interval_minutes = EXCLUDED.sync_interval_minutes,
          updated_by = EXCLUDED.updated_by,
          updated_at = now()
        RETURNING *`,
-      [interval, req.user.sub]
+      [interval, req.user.sub, req.schoolId]
     );
     return res.json(serializeConfig(rows[0]));
   } catch (err) {
@@ -151,7 +152,7 @@ async function updateSyncSettings(req, res, next) {
 // gravar nada — para conferir colunas e intervalo antes de sincronizar.
 async function previewSheet(req, res, next) {
   try {
-    const { range, values } = await resolveSheetRows(await getConfigRow());
+    const { range, values } = await resolveSheetRows(await getConfigRow(req.schoolId));
     return res.json({ range, totalRows: values.length, values: values.slice(0, PREVIEW_ROW_LIMIT) });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -163,7 +164,10 @@ async function previewSheet(req, res, next) {
 async function listSyncRuns(req, res, next) {
   try {
     const limit = Math.min(Number(req.query.limit) || 20, 100);
-    const { rows } = await pool.query('SELECT * FROM sync_runs ORDER BY created_at DESC LIMIT $1', [limit]);
+    const { rows } = await pool.query('SELECT * FROM sync_runs WHERE school_id = $1 ORDER BY created_at DESC LIMIT $2', [
+      req.schoolId,
+      limit,
+    ]);
     return res.json({
       items: rows.map((r) => ({
         id: r.id,

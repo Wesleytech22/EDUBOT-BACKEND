@@ -102,6 +102,36 @@ da Sprint, e configure `N8N_WEBHOOK_URL`/`N8N_WEBHOOK_SECRET`. Sem contatos
 com opt-in, o disparo é recusado com "Nenhum contato com opt-in ativo" (a
 oportunidade não é alterada).
 
+### Multi-escola (Sprint 05)
+
+Cada escola tem o seu próprio controle: oportunidades, contatos, disparo,
+chatbot, métricas, atendimento, planilha e Painel Escolar. Quem cadastra as
+escolas é o **Administrador da plataforma** (perfil `super_admin`, sem
+escola), criado pelo seed quando `SEED_SUPER_ADMIN_EMAIL` e
+`SEED_SUPER_ADMIN_PASSWORD` estão no `.env`. Tudo o que existia antes vai
+para a "Escola Padrão", criada pela migration `013_multi_escola.sql`.
+
+- Administrador e Equipe da Escola só enxergam a escola da própria conta (ela
+  vem do token, nunca do cliente).
+- O Administrador da plataforma abre uma escola mandando o cabeçalho
+  `X-School-Id` e, dentro dela, pode o mesmo que o Administrador da escola.
+- Telegram: um único bot para todas as escolas; cada escola divulga o próprio
+  link `https://t.me/<bot>?start=<identificador>` (aparece na tela Escolas).
+  O mesmo número pode estar em mais de uma escola, com opt-in independente.
+- WhatsApp (N8N/WAHA): cada escola configura
+  `POST /api/webhooks/whatsapp/inbound/<identificador>`; a rota sem
+  identificador só funciona enquanto houver uma única escola ativa.
+- Escola suspensa: ninguém dela entra e o chatbot dela para de responder.
+
+| Método | Rota | Descrição | Perfil |
+|---|---|---|---|
+| GET | `/api/schools` | Escolas com totais de contas, oportunidades, contatos e alunos | Plataforma |
+| POST | `/api/schools` | Cria a escola com o primeiro Administrador (`{ name, admin: { name, email, password } }`) | Plataforma |
+| PATCH | `/api/schools/:id` | Renomeia, suspende ou reativa (`{ name, active }`) | Plataforma |
+| GET/POST | `/api/schools/:id/users` | Contas da escola / nova conta (`role`: `administrador` ou `equipe_escola`) | Plataforma |
+| PATCH | `/api/schools/:id/users/:userId` | Ativa/desativa a conta ou troca o perfil | Plataforma |
+| GET | `/api/schools/current` | Escola aberta no momento e o link do chatbot dela | Escola |
+
 ## Como testar (critérios de aceite, seção 9 do Documento de Escopo)
 
 Casos de sucesso e de erro exercitados manualmente / via curl:

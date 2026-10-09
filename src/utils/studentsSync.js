@@ -58,22 +58,22 @@ function extractStudents(values) {
 const NO_VALID_ROWS_MESSAGE =
   'A planilha não trouxe nenhum aluno válido. Confira se as colunas seguem a ordem Nome, Série, Presenças, Faltas e Situação.';
 
-// Lê a planilha configurada (link ou arquivo anexado) e espelha a tabela
-// students numa transação: atualiza quem está na planilha e remove do ano
+// Lê a planilha configurada da escola (link ou arquivo anexado) e espelha os
+// alunos dela numa transação: atualiza quem está na planilha e remove do ano
 // corrente quem saiu dela, para o painel nunca mostrar aluno que a escola
 // já tirou da planilha. Uma leitura sem nenhuma linha válida é tratada como
 // falha — evita apagar o painel inteiro por causa de uma aba ou intervalo
 // errado. Todo resultado (sucesso/falha) vira uma linha em sync_runs.
-let running = false;
+const running = new Set();
 
-async function syncStudentsFromSheet({ trigger = 'manual' } = {}) {
-  if (running) {
+async function syncStudentsFromSheet({ schoolId, trigger = 'manual' }) {
+  if (running.has(schoolId)) {
     return { status: 'falha', rowsSynced: 0, detail: 'Já existe uma sincronização em andamento.' };
   }
-  running = true;
+  running.add(schoolId);
 
   try {
-    const { rows: configRows } = await pool.query('SELECT * FROM sheet_config WHERE id = 1');
+    const { rows: configRows } = await pool.query('SELECT * FROM sheet_config WHERE school_id = $1', [schoolId]);
     const { values } = await resolveSheetRows(configRows[0]);
 
     const { students, skipped } = extractStudents(values);
@@ -87,20 +87,20 @@ async function syncStudentsFromSheet({ trigger = 'manual' } = {}) {
       const { rows: startRows } = await client.query('SELECT now() AS started_at');
       for (const s of students) {
         await client.query(
-          `INSERT INTO students (name, grade, attendance, attendance_present, attendance_absent, situation, school_year, synced_at)
-           VALUES ($1, $2, $3, $4, $5, $6, EXTRACT(YEAR FROM now()), now())
-           ON CONFLICT (name, grade, school_year) DO UPDATE SET
+          `INSERT INTO students (school_id, name, grade, attendance, attendance_present, attendance_absent, situation, school_year, synced_at)
+           VALUES ($7, $1, $2, $3, $4, $5, $6, EXTRACT(YEAR FROM now()), now())
+           ON CONFLICT (school_id, name, grade, school_year) DO UPDATE SET
              attendance = EXCLUDED.attendance,
              attendance_present = EXCLUDED.attendance_present,
              attendance_absent = EXCLUDED.attendance_absent,
              situation = EXCLUDED.situation,
              synced_at = now()`,
-          [s.name, s.grade, s.attendance, s.present, s.absent, s.situation]
+          [s.name, s.grade, s.attendance, s.present, s.absent, s.situation, schoolId]
         );
       }
       await client.query(
-        'DELETE FROM students WHERE school_year = EXTRACT(YEAR FROM now()) AND synced_at < $1',
-        [startRows[0].started_at]
+        'DELETE FROM students WHERE school_id = $1 AND school_year = EXTRACT(YEAR FROM now()) AND synced_at < $2',
+        [schoolId, startRows[0].started_at]
       );
       await client.query('COMMIT');
     } catch (err) {
@@ -115,17 +115,21 @@ async function syncStudentsFromSheet({ trigger = 'manual' } = {}) {
         ? `${students.length} aluno(s) sincronizado(s); ${skipped} linha(s) ignorada(s) sem nome ou série.`
         : `${students.length} aluno(s) sincronizado(s).`;
     await pool.query(
-      "INSERT INTO sync_runs (status, trigger_type, rows_synced, rows_skipped, detail) VALUES ('sucesso', $1, $2, $3, $4)",
-      [trigger, students.length, skipped, detail]
+      "INSERT INTO sync_runs (school_id, status, trigger_type, rows_synced, rows_skipped, detail) VALUES ($5, 'sucesso', $1, $2, $3, $4)",
+      [trigger, students.length, skipped, detail, schoolId]
     );
     return { status: 'sucesso', rowsSynced: students.length, rowsSkipped: skipped, detail };
   } catch (err) {
     await pool
-      .query("INSERT INTO sync_runs (status, trigger_type, detail) VALUES ('falha', $1, $2)", [trigger, err.message])
+      .query("INSERT INTO sync_runs (school_id, status, trigger_type, detail) VALUES ($3, 'falha', $1, $2)", [
+        trigger,
+        err.message,
+        schoolId,
+      ])
       .catch((logErr) => console.error('[sync] não foi possível registrar a falha:', logErr.message));
     return { status: 'falha', rowsSynced: 0, detail: err.message };
   } finally {
-    running = false;
+    running.delete(schoolId);
   }
 }
 
