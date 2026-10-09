@@ -4,7 +4,9 @@ const {
   getSheetConfig,
   updateSheetConfig,
   uploadSheetFile,
+  updateSyncSettings,
   previewSheet,
+  listSyncRuns,
 } = require('../controllers/integrations.controller');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
@@ -19,6 +21,8 @@ router.use(requireAuth, requireRole('administrador', 'equipe_escola'));
 router.get('/sheets/config', getSheetConfig);
 router.put('/sheets/config', requireRole('administrador'), updateSheetConfig);
 router.post('/sheets/upload', requireRole('administrador'), upload.single('file'), uploadSheetFile);
+router.put('/sheets/sync-settings', requireRole('administrador'), updateSyncSettings);
 router.get('/sheets/preview', previewSheet);
+router.get('/sheets/sync-runs', listSyncRuns);
 
 module.exports = router;

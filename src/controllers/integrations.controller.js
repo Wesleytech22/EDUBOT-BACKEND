@@ -1,7 +1,10 @@
 const pool = require('../db/pool');
 const { extractSheetId, resolveSheetRows } = require('../utils/googleSheets');
 const { parseCsvBuffer } = require('../utils/csvParser');
+const { syncStudentsFromSheet, extractStudents, NO_VALID_ROWS_MESSAGE } = require('../utils/studentsSync');
 
+// Frequências oferecidas na tela (em minutos). 0 = só sincronização manual.
+const SYNC_INTERVAL_OPTIONS = [0, 15, 30, 60, 360, 1440];
 const PREVIEW_ROW_LIMIT = 20;
 
 async function getConfigRow() {
@@ -17,8 +20,16 @@ function serializeConfig(config) {
     sheetRange: config?.sheet_range || 'A:E',
     uploadedFilename: config?.uploaded_filename || null,
     uploadedAt: config?.uploaded_at || null,
+    syncIntervalMinutes: config?.sync_interval_minutes ?? 60,
+    syncIntervalOptions: SYNC_INTERVAL_OPTIONS,
     updatedAt: config?.updated_at || null,
   };
+}
+
+function parseInterval(raw) {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const value = Number(raw);
+  return SYNC_INTERVAL_OPTIONS.includes(value) ? value : null;
 }
 
 // Consulta qual planilha (link ao vivo ou arquivo anexado) está configurada.
@@ -31,35 +42,44 @@ async function getSheetConfig(req, res, next) {
 }
 
 // Modo "link": o Administrador cola o link da planilha e o intervalo lido.
+// Ao salvar, já roda uma sincronização para o painel refletir a planilha
+// nova na hora — se ela falhar, a configuração continua salva e o motivo
+// volta para a tela.
 async function updateSheetConfig(req, res, next) {
   try {
-    const { sheetUrl, sheetRange } = req.body;
+    const { sheetUrl, sheetRange, syncIntervalMinutes } = req.body;
     const sheetId = extractSheetId(sheetUrl);
     if (!sheetId) {
       return res.status(400).json({ error: 'Cole o link completo da planilha do Google Sheets.' });
     }
+    const interval = parseInterval(syncIntervalMinutes);
+    if (interval === null) {
+      return res.status(400).json({ error: 'Frequência de sincronização inválida.' });
+    }
 
     const { rows } = await pool.query(
-      `INSERT INTO sheet_config (id, source, sheet_id, sheet_range, updated_by, updated_at)
-       VALUES (1, 'api', $1, $2, $3, now())
+      `INSERT INTO sheet_config (id, source, sheet_id, sheet_range, sync_interval_minutes, updated_by, updated_at)
+       VALUES (1, 'api', $1, $2, COALESCE($3, 60), $4, now())
        ON CONFLICT (id) DO UPDATE SET
          source = 'api',
          sheet_id = EXCLUDED.sheet_id,
          sheet_range = EXCLUDED.sheet_range,
+         sync_interval_minutes = COALESCE($3, sheet_config.sync_interval_minutes),
          updated_by = EXCLUDED.updated_by,
          updated_at = now()
        RETURNING *`,
-      [sheetId, String(sheetRange || '').trim() || 'A:E', req.user.sub]
+      [sheetId, String(sheetRange || '').trim() || 'A:E', interval ?? null, req.user.sub]
     );
 
-    return res.json({ config: serializeConfig(rows[0]) });
+    const sync = await syncStudentsFromSheet({ trigger: 'manual' });
+    return res.json({ config: serializeConfig(rows[0]), sync });
   } catch (err) {
     return next(err);
   }
 }
 
 // Modo "arquivo": o Administrador anexa um CSV exportado da planilha, para
-// escolas que preferem não compartilhar o link.
+// escolas que preferem não compartilhar o link. Também sincroniza na hora.
 async function uploadSheetFile(req, res, next) {
   try {
     if (!req.file) {
@@ -76,6 +96,11 @@ async function uploadSheetFile(req, res, next) {
     if (values.length === 0) {
       return res.status(400).json({ error: 'O arquivo CSV está vazio.' });
     }
+    // Recusa antes de salvar: um arquivo sem nenhum aluno não pode tomar o
+    // lugar do último CSV bom.
+    if (extractStudents(values).students.length === 0) {
+      return res.status(400).json({ error: NO_VALID_ROWS_MESSAGE });
+    }
 
     const { rows } = await pool.query(
       `INSERT INTO sheet_config (id, source, uploaded_filename, uploaded_rows, uploaded_at, updated_by, updated_at)
@@ -91,9 +116,33 @@ async function uploadSheetFile(req, res, next) {
       [req.file.originalname.slice(0, 255), JSON.stringify(values), req.user.sub]
     );
 
-    return res.json({ config: serializeConfig(rows[0]), rowCount: values.length });
+    const sync = await syncStudentsFromSheet({ trigger: 'manual' });
+    return res.json({ config: serializeConfig(rows[0]), rowCount: values.length, sync });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
+    return next(err);
+  }
+}
+
+// Só a frequência da sincronização automática, sem mexer na origem dos dados.
+async function updateSyncSettings(req, res, next) {
+  try {
+    const interval = parseInterval(req.body.syncIntervalMinutes);
+    if (interval === undefined || interval === null) {
+      return res.status(400).json({ error: 'Frequência de sincronização inválida.' });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO sheet_config (id, sync_interval_minutes, updated_by, updated_at)
+       VALUES (1, $1, $2, now())
+       ON CONFLICT (id) DO UPDATE SET
+         sync_interval_minutes = EXCLUDED.sync_interval_minutes,
+         updated_by = EXCLUDED.updated_by,
+         updated_at = now()
+       RETURNING *`,
+      [interval, req.user.sub]
+    );
+    return res.json(serializeConfig(rows[0]));
+  } catch (err) {
     return next(err);
   }
 }
@@ -110,9 +159,32 @@ async function previewSheet(req, res, next) {
   }
 }
 
+// Histórico de sincronizações, com as falhas expostas junto dos sucessos.
+async function listSyncRuns(req, res, next) {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 20, 100);
+    const { rows } = await pool.query('SELECT * FROM sync_runs ORDER BY created_at DESC LIMIT $1', [limit]);
+    return res.json({
+      items: rows.map((r) => ({
+        id: r.id,
+        status: r.status,
+        trigger: r.trigger_type,
+        rowsSynced: r.rows_synced,
+        rowsSkipped: r.rows_skipped,
+        detail: r.detail,
+        createdAt: r.created_at,
+      })),
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   getSheetConfig,
   updateSheetConfig,
   uploadSheetFile,
+  updateSyncSettings,
   previewSheet,
+  listSyncRuns,
 };
