@@ -1,0 +1,130 @@
+# EduBot — ambientes de DEV e QA da API no Render (Sprint 05).
+#
+# Blueprint: no painel do Render, New > Blueprint, escolha este repositório e
+# a branch que contém este arquivo. Ele cria só os serviços de DEV e QA — o
+# serviço de produção existente não é tocado.
+#
+#   DEV  -> branch pr/integracao-team   (integração das features)
+#   QA   -> branch realese/0.01         (validação com a Product Owner)
+#   PROD -> master/main                 (serviço atual, fora deste arquivo)
+#
+# Cada ambiente tem o PRÓPRIO banco (Neon, branches "dev" e "qa"). Nunca use a
+# DATABASE_URL de produção aqui: as migrations da Sprint 05 (multi-escola)
+# alteram o banco de um jeito que a versão de produção atual não entende.
+#
+# Valores marcados com "sync: false" são pedidos pelo Render ao criar o
+# Blueprint (segredos e endereços de cada ambiente) — veja o guia
+# "Ambientes DEV e QA" para os valores.
+
+services:
+  - type: web
+    name: edubot-api-dev
+    runtime: node
+    plan: free
+    region: ohio
+    branch: pr/integracao-team
+    autoDeploy: true
+    buildCommand: npm ci
+    # Migrations e seed a cada subida: os dois são idempotentes, e o plano
+    # gratuito não tem comando de pré-deploy nem shell.
+    startCommand: npm run migrate && npm run seed && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false
+      - key: PGSSL
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 30m
+      - key: CORS_ORIGIN
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: SEED_SUPER_ADMIN_EMAIL
+        sync: false
+      - key: SEED_SUPER_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_EQUIPE_EMAIL
+        sync: false
+      - key: SEED_EQUIPE_PASSWORD
+        sync: false
+      # Bot de TESTE próprio do ambiente (crie no @BotFather). Nunca o token
+      # de produção: dois servidores lendo o mesmo bot disputam as mensagens.
+      # Vazio = canal Telegram desligado neste ambiente.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: N8N_WEBHOOK_SECRET
+        generateValue: true
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      # O container do Render não traz o pg_dump: em DEV/QA o backup
+      # automático fica desligado (o banco já é uma branch do Neon).
+      - key: BACKUP_CRON_ENABLED
+        value: "false"
+      - key: SHEET_SYNC_ENABLED
+        value: "true"
+
+  - type: web
+    name: edubot-api-qa
+    runtime: node
+    plan: free
+    region: ohio
+    branch: realese/0.01
+    autoDeploy: true
+    buildCommand: npm ci
+    startCommand: npm run migrate && npm run seed && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false
+      - key: PGSSL
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 30m
+      - key: CORS_ORIGIN
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: SEED_SUPER_ADMIN_EMAIL
+        sync: false
+      - key: SEED_SUPER_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_EQUIPE_EMAIL
+        sync: false
+      - key: SEED_EQUIPE_PASSWORD
+        sync: false
+      # Bot de TESTE próprio do ambiente (crie no @BotFather). Nunca o token
+      # de produção: dois servidores lendo o mesmo bot disputam as mensagens.
+      # Vazio = canal Telegram desligado neste ambiente.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: N8N_WEBHOOK_SECRET
+        generateValue: true
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      # O container do Render não traz o pg_dump: em DEV/QA o backup
+      # automático fica desligado (o banco já é uma branch do Neon).
+      - key: BACKUP_CRON_ENABLED
+        value: "false"
+      - key: SHEET_SYNC_ENABLED
+        value: "true"
