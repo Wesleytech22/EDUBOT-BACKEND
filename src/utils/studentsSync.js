@@ -1,11 +1,12 @@
 const pool = require('../db/pool');
 const { resolveSheetRows } = require('./googleSheets');
 
-// Layout esperado da planilha (colunas A a D): Nome | Série | Presenças |
-// Faltas. A linha de cabeçalho, se vier, é reconhecida e ignorada. A
-// coordenação registra números inteiros de presenças/faltas — a frequência
-// (%) e a situação são sempre calculadas pelo sistema, nunca digitadas
-// (uma coluna Situação que ainda venha na planilha é ignorada).
+// Layout esperado da planilha (colunas A a E): Nome | Série | Presenças |
+// Faltas | Contato. A linha de cabeçalho, se vier, é reconhecida e ignorada.
+// A coordenação registra números inteiros de presenças/faltas — a frequência
+// (%) e a situação são sempre calculadas pelo sistema, nunca digitadas. O
+// Contato (telefone, opcional) liga o aluno ao bot do Telegram para a
+// bonificação por interação.
 const HEADER_NAMES = ['nome', 'aluno', 'nome do aluno', 'estudante'];
 
 function isHeaderRow(row) {
@@ -37,8 +38,16 @@ function calculateSituation(present, absent, attendance) {
   return 'Regular';
 }
 
+// Telefone em qualquer formato; só dígitos e "+" ficam. O formato não
+// precisa bater com o do Telegram — a comparação usa phone_match_key
+// (migration 015).
+function parseContact(raw) {
+  const cleaned = String(raw ?? '').replace(/[^\d+]/g, '');
+  return /\d/.test(cleaned) ? cleaned.slice(0, 30) : null;
+}
+
 function toStudent(row) {
-  const [name, grade, presentRaw, absentRaw] = row || [];
+  const [name, grade, presentRaw, absentRaw, contactRaw] = row || [];
   const cleanName = String(name || '').trim();
   const cleanGrade = String(grade || '').trim();
   if (!cleanName || !cleanGrade) return null;
@@ -53,6 +62,7 @@ function toStudent(row) {
     absent,
     attendance,
     situation: calculateSituation(present, absent, attendance),
+    contactPhone: parseContact(contactRaw),
   };
 }
 
@@ -65,7 +75,7 @@ function extractStudents(values) {
 }
 
 const NO_VALID_ROWS_MESSAGE =
-  'A planilha não trouxe nenhum aluno válido. Confira se as colunas seguem a ordem Nome, Série, Presenças e Faltas.';
+  'A planilha não trouxe nenhum aluno válido. Confira se as colunas seguem a ordem Nome, Série, Presenças, Faltas e Contato.';
 
 // Lê a planilha configurada da escola (link ou arquivo anexado) e espelha os
 // alunos dela numa transação: atualiza quem está na planilha e remove do ano
@@ -96,15 +106,16 @@ async function syncStudentsFromSheet({ schoolId, trigger = 'manual' }) {
       const { rows: startRows } = await client.query('SELECT now() AS started_at');
       for (const s of students) {
         await client.query(
-          `INSERT INTO students (school_id, name, grade, attendance, attendance_present, attendance_absent, situation, school_year, synced_at)
-           VALUES ($7, $1, $2, $3, $4, $5, $6, EXTRACT(YEAR FROM now()), now())
+          `INSERT INTO students (school_id, name, grade, attendance, attendance_present, attendance_absent, situation, contact_phone, school_year, synced_at)
+           VALUES ($7, $1, $2, $3, $4, $5, $6, $8, EXTRACT(YEAR FROM now()), now())
            ON CONFLICT (school_id, name, grade, school_year) DO UPDATE SET
              attendance = EXCLUDED.attendance,
              attendance_present = EXCLUDED.attendance_present,
              attendance_absent = EXCLUDED.attendance_absent,
              situation = EXCLUDED.situation,
+             contact_phone = EXCLUDED.contact_phone,
              synced_at = now()`,
-          [s.name, s.grade, s.attendance, s.present, s.absent, s.situation, schoolId]
+          [s.name, s.grade, s.attendance, s.present, s.absent, s.situation, schoolId, s.contactPhone]
         );
       }
       await client.query(
