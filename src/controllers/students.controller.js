@@ -41,14 +41,42 @@ function buildFilters(query) {
   return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
 
-// Visualização consolidada dos alunos, com busca e filtros por série e
-// situação. Somente leitura — a planilha da escola é a única fonte de escrita.
+// Paginação da listagem: page começa em 1; pageSize só aceita os tamanhos
+// oferecidos na tela (padrão 20), para ninguém pedir a base inteira de uma vez.
+const PAGE_SIZES = [10, 20, 50, 100];
+
+function parsePaging(query) {
+  const pageSize = PAGE_SIZES.includes(Number(query.pageSize)) ? Number(query.pageSize) : 20;
+  const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
+  return { page, pageSize };
+}
+
+// Visualização consolidada dos alunos, com busca, filtros por série e
+// situação e paginação. Somente leitura — a planilha da escola é a única fonte de escrita.
 async function list(req, res, next) {
   try {
     const { clause, params } = buildFilters(req.query);
-    const { rows } = await pool.query(`SELECT * FROM students ${clause} ORDER BY name ASC`, params);
+    const paging = parsePaging(req.query);
+    const { pageSize } = paging;
+    const { rows: countRows } = await pool.query(`SELECT COUNT(*)::int AS total FROM students ${clause}`, params);
+    const total = countRows[0].total;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    // Página além do fim (ex.: um filtro reduziu o total) volta para a última.
+    const page = Math.min(paging.page, totalPages);
+
+    const { rows } = await pool.query(
+      `SELECT * FROM students ${clause} ORDER BY name ASC, id ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, (page - 1) * pageSize]
+    );
     const { rows: gradeRows } = await pool.query('SELECT DISTINCT grade FROM students ORDER BY grade ASC');
-    return res.json({ items: rows.map(serialize), total: rows.length, grades: gradeRows.map((r) => r.grade) });
+    return res.json({
+      items: rows.map(serialize),
+      total,
+      page,
+      pageSize,
+      totalPages,
+      grades: gradeRows.map((r) => r.grade),
+    });
   } catch (err) {
     return next(err);
   }
