@@ -67,8 +67,14 @@ services:
         sync: false
       - key: MAIL_FROM
         sync: false
-      # O container do Render não traz o pg_dump: em DEV/QA o backup
-      # automático fica desligado (o banco já é uma branch do Neon).
+      # Backups: o servidor do Render tem o pg_dump, mas o disco do plano
+      # gratuito é temporário — cada backup vai para o banco de backups (branch
+      # "backups" do Neon), separado por ambiente. DEV não faz backup
+      # automático; QA faz (diário e no primeiro uso após 24 h sem backup).
+      - key: BACKUP_STORAGE_URL
+        sync: false
+      - key: BACKUP_ENVIRONMENT
+        value: dev
       - key: BACKUP_CRON_ENABLED
         value: "false"
       - key: SHEET_SYNC_ENABLED
@@ -122,9 +128,15 @@ services:
         sync: false
       - key: MAIL_FROM
         sync: false
-      # O container do Render não traz o pg_dump: em DEV/QA o backup
-      # automático fica desligado (o banco já é uma branch do Neon).
+      # Backups: o servidor do Render tem o pg_dump, mas o disco do plano
+      # gratuito é temporário — cada backup vai para o banco de backups (branch
+      # "backups" do Neon), separado por ambiente. DEV não faz backup
+      # automático; QA faz (diário e no primeiro uso após 24 h sem backup).
+      - key: BACKUP_STORAGE_URL
+        sync: false
+      - key: BACKUP_ENVIRONMENT
+        value: qa
       - key: BACKUP_CRON_ENABLED
-        value: "false"
+        value: "true"
       - key: SHEET_SYNC_ENABLED
         value: "true"
