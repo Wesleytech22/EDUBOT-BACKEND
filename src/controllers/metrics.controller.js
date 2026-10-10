@@ -1,8 +1,10 @@
 const pool = require('../db/pool');
 
-function buildFilters({ opportunityId, from, to }) {
-  const conditions = [];
-  const params = [];
+// Multi-escola — todo recorte começa pela escola: só entram disparos de
+// oportunidades dela e mensagens de contatos dela.
+function buildFilters({ schoolId, opportunityId, from, to }) {
+  const params = [schoolId];
+  const conditions = ['dl.opportunity_id IN (SELECT id FROM opportunities WHERE school_id = $1)'];
 
   if (opportunityId) {
     params.push(opportunityId);
@@ -22,9 +24,9 @@ function buildFilters({ opportunityId, from, to }) {
 }
 
 // Mesmos filtros de buildFilters, aplicados a chatbot_messages (alias cm).
-function buildMessageFilters({ opportunityId, from, to }) {
-  const conditions = [];
-  const params = [];
+function buildMessageFilters({ schoolId, opportunityId, from, to }) {
+  const params = [schoolId];
+  const conditions = ['cm.contact_id IN (SELECT id FROM contacts WHERE school_id = $1)'];
 
   if (opportunityId) {
     params.push(opportunityId);
@@ -187,7 +189,7 @@ async function getWeeklySeries(filters) {
 async function getOverview(req, res, next) {
   try {
     const { opportunityId, from, to } = req.query;
-    const filters = { opportunityId, from, to };
+    const filters = { schoolId: req.schoolId, opportunityId, from, to };
     const [dispatch, weeklySeries, chatbot, weeklyResponses] = await Promise.all([
       getDispatchMetrics(filters),
       getWeeklySeries(filters),
@@ -215,7 +217,7 @@ async function getOverview(req, res, next) {
 async function listAllDispatchLogs(req, res, next) {
   try {
     const { opportunityId, from, to } = req.query;
-    const { conditions, params } = buildFilters({ opportunityId, from, to });
+    const { conditions, params } = buildFilters({ schoolId: req.schoolId, opportunityId, from, to });
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const { rows } = await pool.query(
