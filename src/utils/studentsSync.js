@@ -1,10 +1,11 @@
 const pool = require('../db/pool');
 const { resolveSheetRows } = require('./googleSheets');
 
-// Layout esperado da planilha (colunas A a E): Nome | Série | Presenças |
-// Faltas | Situação. A linha de cabeçalho, se vier, é reconhecida e
-// ignorada. A coordenação registra números inteiros de presenças/faltas —
-// a frequência (%) é sempre calculada pelo sistema, nunca digitada.
+// Layout esperado da planilha (colunas A a D): Nome | Série | Presenças |
+// Faltas. A linha de cabeçalho, se vier, é reconhecida e ignorada. A
+// coordenação registra números inteiros de presenças/faltas — a frequência
+// (%) e a situação são sempre calculadas pelo sistema, nunca digitadas
+// (uma coluna Situação que ainda venha na planilha é ignorada).
 const HEADER_NAMES = ['nome', 'aluno', 'nome do aluno', 'estudante'];
 
 function isHeaderRow(row) {
@@ -22,28 +23,36 @@ function calculateAttendance(present, absent) {
   return Math.round((present / total) * 1000) / 10;
 }
 
-function parseSituation(raw) {
-  const normalized = String(raw || '').trim().toLowerCase();
-  if (normalized.startsWith('risco')) return 'Risco';
-  if (normalized.startsWith('atenc') || normalized.startsWith('atenç')) return 'Atenção';
+// Faixas de frequência: 75% é o mínimo exigido pela LDB; abaixo de 85% o
+// aluno já entra em atenção, antes de chegar ao limite. Sem nenhuma
+// presença/falta registrada ainda não há o que avaliar: fica Regular.
+// Manter em sincronia com a migration 014_situacao_calculada.sql.
+const ATTENTION_BELOW = 85;
+const RISK_BELOW = 75;
+
+function calculateSituation(present, absent, attendance) {
+  if (present + absent === 0) return 'Regular';
+  if (attendance < RISK_BELOW) return 'Risco';
+  if (attendance < ATTENTION_BELOW) return 'Atenção';
   return 'Regular';
 }
 
 function toStudent(row) {
-  const [name, grade, presentRaw, absentRaw, situationRaw] = row || [];
+  const [name, grade, presentRaw, absentRaw] = row || [];
   const cleanName = String(name || '').trim();
   const cleanGrade = String(grade || '').trim();
   if (!cleanName || !cleanGrade) return null;
 
   const present = parseCount(presentRaw);
   const absent = parseCount(absentRaw);
+  const attendance = calculateAttendance(present, absent);
   return {
     name: cleanName.slice(0, 150),
     grade: cleanGrade.slice(0, 50),
     present,
     absent,
-    attendance: calculateAttendance(present, absent),
-    situation: parseSituation(situationRaw),
+    attendance,
+    situation: calculateSituation(present, absent, attendance),
   };
 }
 
@@ -56,7 +65,7 @@ function extractStudents(values) {
 }
 
 const NO_VALID_ROWS_MESSAGE =
-  'A planilha não trouxe nenhum aluno válido. Confira se as colunas seguem a ordem Nome, Série, Presenças, Faltas e Situação.';
+  'A planilha não trouxe nenhum aluno válido. Confira se as colunas seguem a ordem Nome, Série, Presenças e Faltas.';
 
 // Lê a planilha configurada da escola (link ou arquivo anexado) e espelha os
 // alunos dela numa transação: atualiza quem está na planilha e remove do ano
@@ -133,4 +142,4 @@ async function syncStudentsFromSheet({ schoolId, trigger = 'manual' }) {
   }
 }
 
-module.exports = { syncStudentsFromSheet, extractStudents, calculateAttendance, NO_VALID_ROWS_MESSAGE };
+module.exports = { syncStudentsFromSheet, extractStudents, calculateAttendance, calculateSituation, NO_VALID_ROWS_MESSAGE };
