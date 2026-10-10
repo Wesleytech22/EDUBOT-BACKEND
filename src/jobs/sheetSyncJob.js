@@ -31,9 +31,11 @@ function startSheetSyncJob() {
     console.log('[sync] sincronização automática da planilha desativada (SHEET_SYNC_ENABLED=false)');
     return null;
   }
-  return setInterval(() => {
-    tick().catch((err) => console.error('[sync] falha na sincronização automática:', err.message));
-  }, CHECK_EVERY_MS);
+  const run = () => tick().catch((err) => console.error('[sync] falha na sincronização automática:', err.message));
+  // Primeira verificação logo depois de subir: um reinício do servidor (deploy,
+  // nodemon) não pode atrasar uma sincronização que já venceu.
+  setTimeout(run, 5000);
+  return setInterval(run, CHECK_EVERY_MS);
 }
 
 module.exports = { startSheetSyncJob };

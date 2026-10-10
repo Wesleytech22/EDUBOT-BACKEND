@@ -79,19 +79,34 @@ async function summary(req, res, next) {
   }
 }
 
-// Data/hora da última sincronização bem-sucedida e a última tentativa
-// (para sinalizar falha no topo do painel).
+// Próxima sincronização automática: a rotina conta o intervalo a partir da
+// última tentativa (manual ou automática). Sem tentativa ainda, vale "agora"
+// — o próximo ciclo da rotina já sincroniza.
+function nextSyncAt(config, lastRun) {
+  if (!config || config.sync_interval_minutes <= 0) return null;
+  if (!lastRun) return new Date();
+  return new Date(new Date(lastRun.created_at).getTime() + config.sync_interval_minutes * 60 * 1000);
+}
+
+// Data/hora da última sincronização bem-sucedida, a última tentativa (para
+// sinalizar falha no topo do painel) e quando será a próxima automática.
 async function syncStatus(req, res, next) {
   try {
     const { rows: lastSuccess } = await pool.query(
       "SELECT created_at FROM sync_runs WHERE status = 'sucesso' ORDER BY created_at DESC LIMIT 1"
     );
     const { rows: lastRun } = await pool.query('SELECT * FROM sync_runs ORDER BY created_at DESC LIMIT 1');
-    const { rows: config } = await pool.query('SELECT source, sheet_id, uploaded_rows FROM sheet_config WHERE id = 1');
+    const { rows: config } = await pool.query(
+      'SELECT source, sheet_id, uploaded_rows, sync_interval_minutes FROM sheet_config WHERE id = 1'
+    );
     const c = config[0];
+    const configured = Boolean(c && (c.source === 'upload' ? c.uploaded_rows : c.sheet_id));
+    const automatic = configured && String(process.env.SHEET_SYNC_ENABLED).toLowerCase() !== 'false';
 
     return res.json({
-      configured: Boolean(c && (c.source === 'upload' ? c.uploaded_rows : c.sheet_id)),
+      configured,
+      syncIntervalMinutes: c?.sync_interval_minutes ?? 0,
+      nextSyncAt: automatic ? nextSyncAt(c, lastRun[0]) : null,
       lastSuccessfulSyncAt: lastSuccess[0]?.created_at || null,
       lastRun: lastRun[0]
         ? {
