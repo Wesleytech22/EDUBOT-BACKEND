@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const storage = require('./backupStorage');
 
 const BACKUP_DIR = path.resolve(process.env.BACKUP_DIR || path.join(__dirname, '..', '..', 'backups'));
 const RETENTION_COUNT = Number(process.env.BACKUP_RETENTION_COUNT) || 7;
@@ -100,8 +101,31 @@ async function createDump() {
   }
 
   const { size } = await fs.promises.stat(filePath);
+
+  // Com o banco de backups configurado, o arquivo vai para lá e sai do disco
+  // temporário do servidor; sem ele, fica no disco (e a tela avisa).
+  if (storage.isEnabled()) {
+    const data = await fs.promises.readFile(filePath);
+    let removed;
+    try {
+      ({ removed } = await storage.saveBackup({ fileName, data, retention: RETENTION_COUNT }));
+    } catch (err) {
+      // Erros de conexão do Node (ex.: ECONNREFUSED) podem vir com a mensagem vazia.
+      const reason = err.message || err.code || (err.errors && err.errors[0] && err.errors[0].code) || 'erro desconhecido';
+      throw new Error(`O backup foi gerado, mas não foi possível guardá-lo no banco de backups: ${reason}`);
+    }
+    await fs.promises.unlink(filePath).catch(() => {});
+    return {
+      fileName,
+      filePath: `banco de backups (${storage.ENVIRONMENT})`,
+      size,
+      removed,
+      detail: `Guardado no banco de backups (${storage.ENVIRONMENT})`,
+    };
+  }
+
   const removed = await pruneOldBackups();
-  return { fileName, filePath, size, removed };
+  return { fileName, filePath, size, removed, detail: 'Guardado no disco do servidor (temporário)' };
 }
 
 // Registra cada execução em backup_runs (só metadados) para a tela
@@ -148,7 +172,15 @@ if (require.main === module) {
       console.error('[backup] falhou:', err.message);
       process.exitCode = 1;
     })
-    .finally(() => require('./pool').end());
+    .finally(() => Promise.all([require('./pool').end(), storage.close()]));
 }
 
-module.exports = { runBackup, BACKUP_DIR, RETENTION_COUNT };
+// Último backup bem-sucedido — usado pela rotina automática para recuperar
+// o backup do dia quando o servidor estava dormindo no horário agendado.
+async function lastSuccessfulBackupAt() {
+  const pool = require('./pool');
+  const { rows } = await pool.query("SELECT max(created_at) AS at FROM backup_runs WHERE status = 'sucesso'");
+  return rows[0].at;
+}
+
+module.exports = { runBackup, lastSuccessfulBackupAt, BACKUP_DIR, RETENTION_COUNT };

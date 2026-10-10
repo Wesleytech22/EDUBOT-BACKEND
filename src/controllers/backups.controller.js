@@ -1,6 +1,7 @@
 const pool = require('../db/pool');
 const { runBackup, RETENTION_COUNT } = require('../db/backup');
 const { getBackupSchedule } = require('../jobs/backupJob');
+const storage = require('../db/backupStorage');
 
 function serializeRun(r) {
   return {
@@ -25,7 +26,25 @@ async function getStatus(req, res, next) {
       "SELECT * FROM backup_runs WHERE status = 'sucesso' ORDER BY created_at DESC LIMIT 1"
     );
 
+    // Onde os backups ficam: no banco de backups (permanente) ou só no disco
+    // do servidor (temporário no plano gratuito do Render).
+    let stored = null;
+    let storageError = null;
+    if (storage.isEnabled()) {
+      try {
+        stored = (await storage.listBackups()).length;
+      } catch (err) {
+        storageError = `Banco de backups indisponível: ${err.message}`;
+      }
+    }
+
     return res.json({
+      storage: {
+        persistent: storage.isEnabled(),
+        environment: storage.ENVIRONMENT,
+        storedCount: stored,
+        error: storageError,
+      },
       schedule: getBackupSchedule(),
       retentionCount: RETENTION_COUNT,
       lastSuccess: lastSuccess[0] ? serializeRun(lastSuccess[0]) : null,

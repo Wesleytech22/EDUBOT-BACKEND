@@ -10,7 +10,8 @@
     "migrate": "node src/db/migrate.js",
     "seed": "node src/db/seed.js",
     "prepare": "git config core.hooksPath .githooks || true",
-    "backup": "node src/db/backup.js"
+    "backup": "node src/db/backup.js",
+    "backup:baixar": "node src/db/downloadBackup.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
