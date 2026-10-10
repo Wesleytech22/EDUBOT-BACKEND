@@ -82,22 +82,30 @@ async function list(req, res, next) {
   }
 }
 
-// Indicadores da turma: frequência média e desempenho geral (percentual de
-// alunos em situação "Regular" — um indicador simples e honesto, sem
-// inventar uma nota composta que a escola não tem).
+// Indicadores dos cartões do Painel Escolar: frequência média e desempenho
+// geral (percentual de alunos em situação "Regular" — um indicador simples e
+// honesto, sem inventar uma nota composta que a escola não tem). Seguem os
+// mesmos filtros da listagem (busca, série e situação), para os cartões
+// mostrarem o recorte que está na tela; baseTotal é a escola inteira.
 async function summary(req, res, next) {
   try {
+    const { clause, params } = buildFilters(req.query);
     const { rows } = await pool.query(
       `SELECT COUNT(*)::int AS total,
               COALESCE(AVG(attendance), 0) AS avg_attendance,
               COUNT(*) FILTER (WHERE situation = 'Regular')::int AS regular,
               COUNT(*) FILTER (WHERE situation = 'Atenção')::int AS attention,
               COUNT(*) FILTER (WHERE situation = 'Risco')::int AS risk
-       FROM students`
+       FROM students ${clause}`,
+      params
     );
+    const { rows: baseRows } = await pool.query('SELECT COUNT(*)::int AS total FROM students');
+    const { search, grade, situation } = req.query;
     const r = rows[0];
     return res.json({
       totalStudents: r.total,
+      baseTotal: baseRows[0].total,
+      filtered: Boolean(search || (grade && grade !== 'Todas') || (situation && situation !== 'Todas')),
       averageAttendance: Math.round(Number(r.avg_attendance) * 10) / 10,
       regularRate: r.total ? Math.round((r.regular / r.total) * 100) : 0,
       bySituation: { Regular: r.regular, Atenção: r.attention, Risco: r.risk },
