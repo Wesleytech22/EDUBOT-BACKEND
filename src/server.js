@@ -9,10 +9,15 @@ dns.setDefaultResultOrder('ipv4first');
 
 const app = require('./app');
 const { startTelegramBot } = require('./telegram/bot');
+const { startBackupJob } = require('./jobs/backupJob');
+const { startSheetSyncJob } = require('./jobs/sheetSyncJob');
 
 const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {
-  console.log(`EduBot API (Sprint 04) rodando em http://localhost:${PORT}`);
+  console.log(`EduBot API (Sprint 05) rodando em http://localhost:${PORT}`);
   startTelegramBot();
 });
+
+startBackupJob();
+startSheetSyncJob();
