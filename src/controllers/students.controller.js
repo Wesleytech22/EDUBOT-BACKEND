@@ -12,13 +12,45 @@ function serialize(row) {
     situation: row.situation,
     schoolYear: row.school_year,
     syncedAt: row.synced_at,
+    contactPhone: row.contact_phone,
+    bonus: {
+      points: row.bonus_points,
+      telegramLinked: row.telegram_linked,
+      interactions: row.interactions,
+      lastInteractionAt: row.last_interaction_at,
+    },
   };
 }
+
+// Bonificação: o aluno cujo Contato (planilha) é o mesmo telefone de um
+// contato do bot ganha pontos por vincular o Telegram e por cada mensagem
+// enviada ao bot. Calculada na leitura, então vale para quem entrar no bot
+// a qualquer momento, sem esperar a próxima sincronização da planilha.
+const LINK_POINTS = 10;
+const INTERACTION_POINTS = 5;
+
+const STUDENTS_WITH_BONUS = `(
+  SELECT s.*,
+         COALESCE(e.linked, false) AS telegram_linked,
+         COALESCE(e.interactions, 0) AS interactions,
+         e.last_interaction_at,
+         (CASE WHEN e.linked THEN ${LINK_POINTS} ELSE 0 END
+           + COALESCE(e.interactions, 0) * ${INTERACTION_POINTS})::int AS bonus_points
+  FROM students s
+  LEFT JOIN LATERAL (
+    SELECT bool_or(c.telegram_chat_id IS NOT NULL) AS linked,
+           COUNT(cm.id)::int AS interactions,
+           MAX(cm.created_at) AS last_interaction_at
+    FROM contacts c
+    LEFT JOIN chatbot_messages cm ON cm.contact_id = c.id
+    WHERE c.school_id = s.school_id AND c.phone_key = s.contact_key
+  ) e ON true
+) st`;
 
 // Filtros compartilhados entre a listagem e a exportação em CSV.
 // Multi-escola — sempre começa pela escola de quem está logado.
 function buildFilters(query, schoolId) {
-  const { search, grade, situation, schoolYear } = query;
+  const { search, grade, situation, schoolYear, engagement } = query;
   const params = [schoolId];
   const where = ['school_id = $1'];
 
@@ -38,6 +70,8 @@ function buildFilters(query, schoolId) {
     params.push(Number(schoolYear));
     where.push(`school_year = $${params.length}`);
   }
+  if (engagement === 'Engajados') where.push('bonus_points > 0');
+  if (engagement === 'Não engajados') where.push('bonus_points = 0');
 
   return { clause: `WHERE ${where.join(' AND ')}`, params };
 }
@@ -59,14 +93,17 @@ async function list(req, res, next) {
     const { clause, params } = buildFilters(req.query, req.schoolId);
     const paging = parsePaging(req.query);
     const { pageSize } = paging;
-    const { rows: countRows } = await pool.query(`SELECT COUNT(*)::int AS total FROM students ${clause}`, params);
+    const { rows: countRows } = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM ${STUDENTS_WITH_BONUS} ${clause}`,
+      params
+    );
     const total = countRows[0].total;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     // Página além do fim (ex.: um filtro reduziu o total) volta para a última.
     const page = Math.min(paging.page, totalPages);
 
     const { rows } = await pool.query(
-      `SELECT * FROM students ${clause} ORDER BY name ASC, id ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      `SELECT * FROM ${STUDENTS_WITH_BONUS} ${clause} ORDER BY name ASC, id ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, pageSize, (page - 1) * pageSize]
     );
     const { rows: gradeRows } = await pool.query(
@@ -99,22 +136,31 @@ async function summary(req, res, next) {
               COALESCE(AVG(attendance), 0) AS avg_attendance,
               COUNT(*) FILTER (WHERE situation = 'Regular')::int AS regular,
               COUNT(*) FILTER (WHERE situation = 'Atenção')::int AS attention,
-              COUNT(*) FILTER (WHERE situation = 'Risco')::int AS risk
-       FROM students ${clause}`,
+              COUNT(*) FILTER (WHERE situation = 'Risco')::int AS risk,
+              COUNT(*) FILTER (WHERE bonus_points > 0)::int AS engaged,
+              COUNT(*) FILTER (WHERE contact_key IS NOT NULL)::int AS with_contact,
+              COALESCE(SUM(bonus_points), 0)::int AS points
+       FROM ${STUDENTS_WITH_BONUS} ${clause}`,
       params
     );
     const { rows: baseRows } = await pool.query('SELECT COUNT(*)::int AS total FROM students WHERE school_id = $1', [
       req.schoolId,
     ]);
-    const { search, grade, situation } = req.query;
+    const { search, grade, situation, engagement } = req.query;
     const r = rows[0];
     return res.json({
       totalStudents: r.total,
       baseTotal: baseRows[0].total,
-      filtered: Boolean(search || (grade && grade !== 'Todas') || (situation && situation !== 'Todas')),
+      filtered: Boolean(
+        search ||
+          (grade && grade !== 'Todas') ||
+          (situation && situation !== 'Todas') ||
+          (engagement && engagement !== 'Todos')
+      ),
       averageAttendance: Math.round(Number(r.avg_attendance) * 10) / 10,
       regularRate: r.total ? Math.round((r.regular / r.total) * 100) : 0,
       bySituation: { Regular: r.regular, Atenção: r.attention, Risco: r.risk },
+      bonus: { engaged: r.engaged, withContact: r.with_contact, points: r.points },
     });
   } catch (err) {
     return next(err);
@@ -193,9 +239,21 @@ function csvCell(value) {
 async function exportCsv(req, res, next) {
   try {
     const { clause, params } = buildFilters(req.query, req.schoolId);
-    const { rows } = await pool.query(`SELECT * FROM students ${clause} ORDER BY name ASC`, params);
+    const { rows } = await pool.query(`SELECT * FROM ${STUDENTS_WITH_BONUS} ${clause} ORDER BY name ASC`, params);
 
-    const header = ['Nome', 'Série', 'Presenças', 'Faltas', 'Frequência (%)', 'Situação', 'Última atualização'];
+    const header = [
+      'Nome',
+      'Série',
+      'Presenças',
+      'Faltas',
+      'Frequência (%)',
+      'Situação',
+      'Contato',
+      'Telegram',
+      'Interações',
+      'Pontos',
+      'Última atualização',
+    ];
     const lines = rows.map((r) =>
       [
         r.name,
@@ -204,6 +262,10 @@ async function exportCsv(req, res, next) {
         r.attendance_absent,
         Number(r.attendance).toFixed(1).replace('.', ','),
         r.situation,
+        r.contact_phone,
+        r.telegram_linked ? 'Vinculado' : 'Não vinculado',
+        r.interactions,
+        r.bonus_points,
         new Date(r.synced_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
       ]
         .map(csvCell)
