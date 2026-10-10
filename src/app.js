@@ -36,7 +36,7 @@ app.use(
 app.use(express.json());
 app.use(morgan('dev'));
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', sprint: '04' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', sprint: '05' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/opportunities', opportunitiesRoutes);
