@@ -118,7 +118,7 @@ async function getWeeklyResponses(filters) {
   const { conditions, params } = buildMessageFilters(filters);
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const { rows } = await pool.query(
-    `SELECT date_trunc('week', cm.created_at)::date AS week, COUNT(*)::int AS count
+    `SELECT date_trunc('week', cm.created_at AT TIME ZONE 'America/Manaus')::date AS week, COUNT(*)::int AS count
      FROM chatbot_messages cm ${where}
      GROUP BY week`,
     params
@@ -165,7 +165,7 @@ async function getWeeklySeries(filters) {
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const { rows } = await pool.query(
-    `SELECT date_trunc('week', dl.created_at)::date AS week, dl.status, COUNT(*)::int AS count
+    `SELECT date_trunc('week', dl.created_at AT TIME ZONE 'America/Manaus')::date AS week, dl.status, COUNT(*)::int AS count
      FROM dispatch_logs dl
      ${where}
      GROUP BY week, dl.status
