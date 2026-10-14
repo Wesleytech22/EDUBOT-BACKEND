@@ -31,7 +31,8 @@ router.use(requireAuth, requireRole('administrador', 'equipe_escola'));
 // Leitura: Administrador e Equipe da Escola (tela "Sobre Nós").
 router.get('/', list);
 
-// Upload de foto: restrito ao Administrador.
-router.put('/:id/photo', requireRole('administrador'), uploadPhoto, updatePhoto);
+// Upload de foto: restrito ao Administrador da plataforma (super_admin).
+// O Administrador da escola só visualiza as fotos.
+router.put('/:id/photo', requireRole('super_admin'), uploadPhoto, updatePhoto);
 
 module.exports = router;
