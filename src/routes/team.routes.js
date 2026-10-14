@@ -16,6 +16,9 @@ const upload = multer({
 
 function uploadPhoto(req, res, next) {
   upload.single('photo')(req, res, (err) => {
+    if (err?.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'A imagem passa de 2 MB. Escolha uma foto menor.' });
+    }
     if (err) return res.status(400).json({ error: err.message || 'Falha no upload da imagem.' });
     return next();
   });
