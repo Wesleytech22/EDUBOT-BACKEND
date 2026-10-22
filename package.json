@@ -11,7 +11,8 @@
     "seed": "node src/db/seed.js",
     "prepare": "git config core.hooksPath .githooks || true",
     "backup": "node src/db/backup.js",
-    "backup:baixar": "node src/db/downloadBackup.js"
+    "backup:baixar": "node src/db/downloadBackup.js",
+    "admin:plataforma": "node src/db/createPlatformAdmin.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
