@@ -92,10 +92,10 @@ async function create(req, res, next) {
     // PUT /opportunities/:id/attachment, não pelo formulário.
     const { rows } = await pool.query(
       `INSERT INTO opportunities
-        (title, description, target_audience, deadline, link, is_draft, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+        (title, description, target_audience, deadline, link, is_draft, created_by, school_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        RETURNING *`,
-      [title, description, targetAudience, deadline, link || null, Boolean(isDraft), req.user.sub]
+      [title, description, targetAudience, deadline, link || null, Boolean(isDraft), req.user.sub, req.schoolId]
     );
 
     return res.status(201).json(serialize(rows[0]));
@@ -108,7 +108,9 @@ async function create(req, res, next) {
 async function list(req, res, next) {
   try {
     const { search, status, targetAudience } = req.query;
-    const { rows } = await pool.query('SELECT * FROM opportunities ORDER BY created_at DESC');
+    const { rows } = await pool.query('SELECT * FROM opportunities WHERE school_id = $1 ORDER BY created_at DESC', [
+      req.schoolId,
+    ]);
 
     let items = rows.map(serialize);
 
@@ -199,7 +201,10 @@ async function dispatch(req, res, next) {
     }
     if (current.dispatched_at) return res.status(400).json({ error: 'O disparo não pode ser cancelado nem repetido depois de iniciado.' });
 
-    const { rows: contacts } = await pool.query('SELECT * FROM contacts WHERE opt_in = true');
+    // Multi-escola — o broadcast só atinge a lista de contatos da escola.
+    const { rows: contacts } = await pool.query('SELECT * FROM contacts WHERE opt_in = true AND school_id = $1', [
+      req.schoolId,
+    ]);
     if (contacts.length === 0) {
       return res.status(400).json({ error: 'Nenhum contato com opt-in ativo para receber o disparo.' });
     }
@@ -213,9 +218,9 @@ async function dispatch(req, res, next) {
 
     const { rows: logRows } = await pool.query(
       `INSERT INTO dispatch_logs (opportunity_id, contact_id, status)
-       SELECT $1, id, 'pendente' FROM contacts WHERE opt_in = true
+       SELECT $1, id, 'pendente' FROM contacts WHERE opt_in = true AND school_id = $2
        RETURNING *`,
-      [req.params.id]
+      [req.params.id, req.schoolId]
     );
 
     const logIdByContactId = new Map(logRows.map((l) => [l.contact_id, l.id]));

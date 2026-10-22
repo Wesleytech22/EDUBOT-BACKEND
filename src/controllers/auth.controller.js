@@ -37,7 +37,15 @@ async function login(req, res, next) {
       return res.status(400).json({ error: 'Informe e-mail institucional e senha.' });
     }
 
-    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    // E-mail sem diferença de maiúsculas/minúsculas nem espaços nas pontas:
+    // o cadastro de contas grava em minúsculas, mas a pessoa pode digitar
+    // "Fulano@Escola.com" no login.
+    const { rows } = await pool.query(
+      `SELECT u.*, s.name AS school_name, s.active AS school_active
+       FROM users u LEFT JOIN schools s ON s.id = u.school_id
+       WHERE lower(u.email) = lower(btrim($1))`,
+      [String(email)]
+    );
     const user = rows[0];
 
     if (!user) {
@@ -65,6 +73,16 @@ async function login(req, res, next) {
       return res.status(401).json({ error: 'Credenciais inválidas.' });
     }
 
+    // Multi-escola — conta desativada ou escola desativada pelo Administrador
+    // da plataforma não entra (só depois da senha certa, para não revelar
+    // quais e-mails existem).
+    if (!user.active) {
+      return res.status(403).json({ error: 'Esta conta foi desativada. Fale com a coordenação da escola.' });
+    }
+    if (user.school_id && !user.school_active) {
+      return res.status(403).json({ error: 'O acesso desta escola está suspenso. Fale com a equipe do EduBot.' });
+    }
+
     if (user.failed_login_attempts > 0 || user.locked_until) {
       await pool.query(
         'UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1',
@@ -82,7 +100,14 @@ async function login(req, res, next) {
 
     return res.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        schoolId: user.school_id,
+        schoolName: user.school_name,
+      },
     });
   } catch (err) {
     return next(err);
@@ -102,7 +127,9 @@ async function forgotPassword(req, res, next) {
       return res.status(400).json({ error: 'Informe o e-mail institucional.' });
     }
 
-    const { rows } = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    const { rows } = await pool.query('SELECT id FROM users WHERE lower(email) = lower(btrim($1))', [
+      String(email),
+    ]);
     const user = rows[0];
 
     if (user) {

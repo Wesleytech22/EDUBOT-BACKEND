@@ -1,19 +1,29 @@
 // RF-20 — restrição de negócio: sem rota de sign-up público.
-// Contas de acesso são criadas exclusivamente pelo Administrador via seed,
+// Contas de acesso são criadas pelo seed e, com o multi-escola, pelo
+// Administrador da plataforma na tela "Escolas" — nunca por autocadastro,
 // para proteger dados escolares (ver Documento de Escopo, seção 5.7).
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const pool = require('./pool');
 
-async function upsertUser({ name, email, password, role }) {
+// schoolId nulo = Administrador da plataforma (super_admin).
+async function upsertUser({ name, email, password, role, schoolId = null }) {
   const passwordHash = await bcrypt.hash(password, 10);
   await pool.query(
-    `INSERT INTO users (name, email, password_hash, role)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role`,
-    [name, email, passwordHash, role]
+    `INSERT INTO users (name, email, password_hash, role, school_id)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role,
+       school_id = EXCLUDED.school_id`,
+    [name, email, passwordHash, role, schoolId]
   );
   console.log(`Usuário pronto: ${email} (${role})`);
+}
+
+// Escola criada pela migration do multi-escola, que recebe as contas seed.
+async function defaultSchoolId() {
+  const { rows } = await pool.query("SELECT id FROM schools WHERE slug = 'escola-padrao'");
+  if (!rows[0]) throw new Error('Escola padrão não encontrada — rode npm run migrate antes do seed.');
+  return rows[0].id;
 }
 
 // Tela "Sobre Nós" — créditos da equipe (Universidade Cruzeiro do Sul,
@@ -75,11 +85,25 @@ async function upsertTeamMember({ name, role, bio, displayOrder }) {
 }
 
 async function seed() {
+  const schoolId = await defaultSchoolId();
+
+  // Só cria o Administrador da plataforma quando o e-mail dele está no .env —
+  // sem valor padrão, para nunca subir uma conta com senha conhecida.
+  if (process.env.SEED_SUPER_ADMIN_EMAIL && process.env.SEED_SUPER_ADMIN_PASSWORD) {
+    await upsertUser({
+      name: 'Administrador da Plataforma',
+      email: process.env.SEED_SUPER_ADMIN_EMAIL,
+      password: process.env.SEED_SUPER_ADMIN_PASSWORD,
+      role: 'super_admin',
+    });
+  }
+
   await upsertUser({
     name: 'Coordenação Pedagógica',
     email: process.env.SEED_ADMIN_EMAIL || 'coordenacao@escola.edu.br',
     password: process.env.SEED_ADMIN_PASSWORD || 'EduBot@2026',
     role: 'administrador',
+    schoolId,
   });
 
   await upsertUser({
@@ -87,6 +111,7 @@ async function seed() {
     email: process.env.SEED_EQUIPE_EMAIL || 'equipe@escola.edu.br',
     password: process.env.SEED_EQUIPE_PASSWORD || 'EduBot@2026',
     role: 'equipe_escola',
+    schoolId,
   });
 
   for (const member of TEAM_MEMBERS) {
